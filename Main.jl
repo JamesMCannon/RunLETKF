@@ -83,14 +83,12 @@ end
 
 @info "statetypes: " statetypes
 
-
 TX_range = parse(Float64, get(ENV, "TX_RANGE_KW", "500")) * 1000 #convert to watts
 
 const NML_LOWER = max(1, NMLb - TX_range/2)
 const NML_UPPER = NMLb + TX_range/2
 const NLK_LOWER = max(1, NLKb - TX_range/2)
 const NLK_UPPER = NLKb + TX_range/2
-
 
 ens_size = parse(Int, get(ENV, "ENS_SIZE", "50"))
 ntimes = parse(Int, get(ENV, "ITRS", "1"))
@@ -107,10 +105,12 @@ data = observations("Inputs/day1",σamp, σphase)
 
 σTXkw = Int(σTX/1000)
 
-if shuffle_rx || shuffle_xy
-    scenario = "rx_offset_$(ntimes)itr_$(ens_size)ens_$(ρ)_daytime_constrAndResamp_shuffled"
+if shuffle_tx && shuffle_xy
+    scenario = "tx_pwrs_$(ntimes)itr_$(ens_size)ens_$(σTXkw)txkW_$(ρ)_shuffle_all_limited"
+elseif shuffle_tx
+    scenario = "tx_pwrs_$(ntimes)itr_$(ens_size)ens_$(σTXkw)txkW_$(ρ)_shuffle_$(shuffle_tx)"
 else
-    scenario = "rx_offset_$(ntimes)itr_$(ens_size)ens_$(ρ)_daytime_constrAndResamp"
+    scenario = "baseline_$(ntimes)itr_$(ens_size)_shuffle_$(shuffle_xy)_limited"
 end
 
 if !(do_amp && do_phase)

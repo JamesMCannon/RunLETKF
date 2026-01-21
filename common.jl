@@ -4,7 +4,7 @@ reset_rng(seed) = StableRNG(seed)
 """
     buildpaths()
 
-Return a vector of `(Transmitter, Receiver)` propagation paths used in the scenarios
+Return a vector of `(Transmitter, Receiver)` propagation paths used in the scenarios.
 """
 function buildpaths()
     transmitters = [TRANSMITTER[:NLK], TRANSMITTER[:NML]]
@@ -114,7 +114,7 @@ function init_params()
     trans = Proj.Transformation(modelproj, MVIA.wgs84())
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
-    paths = buildpaths()
+    paths = buildtruepaths()
     localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
     filterbounds!(localization, lola, west, east, south, north)
 

@@ -14,7 +14,7 @@ function runletkf(parameters)
 
     lengthscale = only(modelsteps).lengthscale
 
-    paths = buildpaths()
+    paths = buildtruepaths()
     npaths = length(paths)
     
     gridshape = (length(y_grid), length(x_grid))  # useful later
@@ -54,7 +54,7 @@ function runletkf(parameters)
 
     if :tx in statetypes
 
-        NLKb = get(parameters(), :NLKb, 250000) 
+        NLKb = get(parameters(), :NLKb, 250000)
         NMLb = get(parameters(), :NMLb, 233000)
 
         NMLdistribution = Distributions.Normal(NMLb, σNML) #Nominal values from FWM dictionary
@@ -192,7 +192,10 @@ function runletkf(parameters)
             for x in shuffled_xy.x
                 for y in shuffled_xy.y
                     for f in shuffled_xy.field
-                        shuffled_xy(x=x,y=y,field=f) .= shuffle(shuffled_xy(x=x,y=y,field=f))
+                        var = std(shuffled_xy(x=x,y=y,field=f))
+                        if (f == :h && var < 1.5) || (f == :b && var < 0.024) #TODO add counter for percentage of points shuffled
+                            shuffled_xy(x=x,y=y,field=f) .= shuffle(shuffled_xy(x=x,y=y,field=f))
+                        end
                     end
                 end
             end
@@ -288,7 +291,7 @@ function runletkf(parameters)
 
         state.xy_state(t=i) .= xnew.xy_state
 
-        if :tx in statetypes
+        if :tx in statetypes #TODO perhaps change this to pass TX_range to parameters rather than assign 4 consts.
             xnew.tx_pwrs(:NLK)[xnew.tx_pwrs(:NLK) .< NLK_LOWER] .= NLK_LOWER
             xnew.tx_pwrs(:NLK)[xnew.tx_pwrs(:NLK) .> NLK_UPPER] .= NLK_UPPER
             xnew.tx_pwrs(:NML)[xnew.tx_pwrs(:NML) .< NML_LOWER] .= NML_LOWER

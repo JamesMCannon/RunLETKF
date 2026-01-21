@@ -1411,7 +1411,7 @@ version = "1.1.3"
 
 [[deps.ModifiedVLFInversionAlgorithms]]
 deps = ["AxisKeys", "Dates", "Distributions", "GeoStats", "GeoTables", "GeographicLib", "ImageFiltering", "Interpolations", "IntervalSets", "LMPTools", "LibGEOS", "LinearAlgebra", "LongwaveModePropagator", "NLopt", "NonlinearSolve", "ProgressMeter", "Proj", "Random", "ScatteredInterpolation", "StaticArrays", "StaticArraysCore", "Statistics", "TableTransforms", "UnPack"]
-path = "/projects/jaca8590/Julia/State_Vector_Updates/ModifiedVLFInversionAlgorithms.jl/"
+path = "/projects/jaca8590/Julia/State_Vector_Updates/ModifiedVLFInversionAlgorithms.jl"
 uuid = "0803ec96-7665-482a-9427-2785addca038"
 version = "0.0.15"
 

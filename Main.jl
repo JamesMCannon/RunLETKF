@@ -1,3 +1,4 @@
+### Package Management
 using Pkg
 Pkg.activate(@__DIR__)
 
@@ -22,6 +23,7 @@ const SI = ScatteredInterpolation
 include("common.jl")
 include("letkf.jl")
 
+### Set Global Parameters
 # Path at which to write output.
 const RESDIR = Ref(abspath(joinpath(@__DIR__, "results")))
 resdir() = RESDIR[]
@@ -29,26 +31,18 @@ resdir(d) = joinpath(resdir(), d)
 resdir!(d) = isdir(d) ? RESDIR[] = d : throw(ArgumentError("$(abspath(d)) must be a directory"))
 resdir!() = RESDIR[] = normpath(joinpath(@__DIR__))
 
-"Constrain values to physically realistic (but wide) bounds"
+# Constrain values to physically realistic (but wide) bounds
 const MIN_BETA = 0.22
-const MAX_BETA = 0.425
-const MIN_H = 65
-const MAX_H = 80
+const MAX_BETA = 0.55
+const MIN_H = 55
+const MAX_H = 90
 
-"Sets size of simulated data - effectively sets the maximum number of LETKF iterations."
+# Sets size of simulated data - effectively sets the maximum number of LETKF iterations.
 const DATALENGTH = 10
+
+### Set Common parameters
 dt = DateTime(2020, 3, 1, 20, 00) #using Dates
-
 σamp, σphase = 0.1, deg2rad(1.0)
-
-NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
-NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
-
-σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
-
-precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
-
-σNLK, σNML = σTX, σTX
 
 do_amp = parse(Bool, get(ENV, "DO_AMP", "true"))
 do_phase = parse(Bool, get(ENV, "DO_PHASE", "true"))
@@ -62,10 +56,17 @@ end
 if do_phase
     datatypes = (datatypes..., :phase)
 end
+do_xy = parse(Bool, get(ENV, "DO_XY", "true")) # Currently, only "true" is supported
 
-do_tx = parse(Bool, get(ENV, "DO_TX", "true"))
-do_xy = parse(Bool, get(ENV, "DO_XY", "true")) #These sets are for the tx power testing.
-do_rx = parse(Bool, get(ENV, "DO_RX", "false"))
+ens_size = parse(Int, get(ENV, "ENS_SIZE", "50"))
+ntimes = parse(Int, get(ENV, "ITRS", "1"))
+shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
+
+ρ = parse(Float64, get(ENV, "RHO","1.1"))
+
+rng = reset_rng()
+
+data = observations("Inputs/day1",σamp, σphase)
 
 statetypes = ()
 
@@ -73,15 +74,13 @@ if do_xy
     statetypes = (statetypes..., :xy)
 end
 
-if do_tx
-    statetypes = (statetypes..., :tx)
-end
+### Set TX parameters
+do_tx = parse(Bool, get(ENV, "DO_TX", "false"))
+NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
+NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
 
-if do_rx
-    statetypes = (statetypes..., :rx)
-end
-
-@info "statetypes: " statetypes
+σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
+σNLK, σNML = σTX, σTX
 
 TX_range = parse(Float64, get(ENV, "TX_RANGE_KW", "500")) * 1000 #convert to watts
 
@@ -90,27 +89,41 @@ const NML_UPPER = NMLb + TX_range/2
 const NLK_LOWER = max(1, NLKb - TX_range/2)
 const NLK_UPPER = NLKb + TX_range/2
 
-ens_size = parse(Int, get(ENV, "ENS_SIZE", "50"))
-ntimes = parse(Int, get(ENV, "ITRS", "1"))
-
 shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
-shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
-shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
-
-ρ = parse(Float64, get(ENV, "RHO","1.1"))
-
-rng = reset_rng()
-
-data = observations("Inputs/day1",σamp, σphase)
 
 σTXkw = Int(σTX/1000)
 
-if shuffle_tx && shuffle_xy
-    scenario = "tx_pwrs_$(ntimes)itr_$(ens_size)ens_$(σTXkw)txkW_$(ρ)_shuffle_all_limited"
-elseif shuffle_tx
-    scenario = "tx_pwrs_$(ntimes)itr_$(ens_size)ens_$(σTXkw)txkW_$(ρ)_shuffle_$(shuffle_tx)"
+if do_tx
+    statetypes = (statetypes..., :tx)
+end
+
+### Set RX Parameters
+do_rx = parse(Bool, get(ENV, "DO_RX", "false"))
+precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
+shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
+
+if do_rx
+    statetypes = (statetypes..., :rx)
+end
+
+### Bring it all together
+
+@info "statetypes: " statetypes
+
+if !do_tx && !do_rx
+    scenario = "baseline_"
+elseif do_tx && !do_rx
+    scenario = "tx_pwrs_"
+elseif !do_tx && do_rx
+    scenario = "rx_offset_"   
 else
-    scenario = "baseline_$(ntimes)itr_$(ens_size)_shuffle_$(shuffle_xy)_limited"
+    scenario = "tx_rx_"
+end
+
+scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)_"
+
+if shuffle_tx || shuffle_rx || shuffle_xy
+    scenario = scenario * "shuffle_"
 end
 
 if !(do_amp && do_phase)
@@ -131,7 +144,7 @@ if precondition_rx
     scenario = scenario * "_preconditioned_v2"
 end
 
-parameters() = merge(init_params(), (;data, σamp, σphase, dt, rng, scenario, σNLK, σNML, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_rx, shuffle_tx, shuffle_xy, precondition_rx))
+parameters() = merge(init_params(), (; data, σamp, σphase, dt, rng, scenario, σNLK, σNML, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_rx, shuffle_tx, shuffle_xy, precondition_rx))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 

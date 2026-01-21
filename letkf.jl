@@ -38,7 +38,7 @@ function runletkf(parameters)
     b_init = reshape(rand(rng, bdistribution, ens_size), gridshape..., ens_size)
      
     replace!(x->x < MIN_BETA ? MIN_BETA : x, b_init) #TODO Check structure here; GPT thinks this is not an appropriate way to do this
-    replace!(x->x > MAX_BETA ? MAX_BETA : x, b_init) # possible corerction: b_init[b_init .< MIN_BETA] .= MIN_BETA
+    replace!(x->x > MAX_BETA ? MAX_BETA : x, b_init) # possible correction: b_init[b_init .< MIN_BETA] .= MIN_BETA
     replace!(x->x < MIN_H ? MIN_H : x, h_init) 
     replace!(x->x > MAX_H ? MAX_H : x, h_init)
 
@@ -53,10 +53,11 @@ function runletkf(parameters)
     xy_state(:b)(t=0) .= b_init
 
     if :tx in statetypes
-        NLKb = get(parameters(), :NLKb, 250000) #Nominal values from FWM dictionary
+
+        NLKb = get(parameters(), :NLKb, 250000) 
         NMLb = get(parameters(), :NMLb, 233000)
 
-        NMLdistribution = Distributions.Normal(NMLb, σNML) 
+        NMLdistribution = Distributions.Normal(NMLb, σNML) #Nominal values from FWM dictionary
         NLKdistribution = Distributions.Normal(NLKb, σNLK)
 
         NML_init = rand(rng, NMLdistribution, ens_size)
@@ -69,13 +70,17 @@ function runletkf(parameters)
     end
 
     if :rx in statetypes
+
         rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
         rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size)) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
+    
     end
    
     R = [fill(σamp^2, npaths); fill(σphase^2, npaths)] # Vector is transformed into a diagonal matrix in MVIA
 
-    ym = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, ntimes+1); field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
+    # Run model
+    ym = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, ntimes+1); 
+        field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
     
     if precondition_rx
         start_time = Dates.now()
@@ -153,7 +158,7 @@ function runletkf(parameters)
     elseif :rx in statetypes && :xy in statetypes && :tx in statetypes
         state = (; xy_state, tx_pwrs, rx_phi_offset)
     else 
-        state = xy_state #TODO refactor to (; xy_state) - requires functions in MVIA
+        state = (; xy_state) #TODO refactor to (; xy_state) - requires functions in MVIA
     end
 
     forward_model =
@@ -208,14 +213,14 @@ function runletkf(parameters)
                 rx_phi_offset = state.rx_phi_offset(t=i-1)
             end
         end
-
-
         if :tx in statetypes && :rx in statetypes
             xold = (; xy_state, tx_pwrs, rx_phi_offset)
         elseif :tx in statetypes
             xold = (; xy_state, tx_pwrs)
         elseif :rx in statetypes
             xold = (; xy_state, rx_phi_offset)
+        elseif :xy in statetypes
+            xold = (; xy_state)
         else
             error("Incomplete state types for LETKF")
         end
@@ -284,6 +289,10 @@ function runletkf(parameters)
         state.xy_state(t=i) .= xnew.xy_state
 
         if :tx in statetypes
+            xnew.tx_pwrs(:NLK)[xnew.tx_pwrs(:NLK) .< NLK_LOWER] .= NLK_LOWER
+            xnew.tx_pwrs(:NLK)[xnew.tx_pwrs(:NLK) .> NLK_UPPER] .= NLK_UPPER
+            xnew.tx_pwrs(:NML)[xnew.tx_pwrs(:NML) .< NML_LOWER] .= NML_LOWER
+            xnew.tx_pwrs(:NML)[xnew.tx_pwrs(:NML) .> NML_UPPER] .= NML_UPPER
             state.tx_pwrs(t=i) .= xnew.tx_pwrs
         end
 
@@ -311,7 +320,7 @@ function runletkf(parameters)
     elseif :rx in statetypes
         xfinal = (; xy_state, rx_phi_offset)
     else
-        xfinal = xy_state
+        xfinal = (; xy_state)
     end
 
     H!(xfinal, ntimes)

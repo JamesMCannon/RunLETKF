@@ -41,22 +41,63 @@ dt = DateTime(2020, 3, 1, 20, 00) #using Dates
 
 σamp, σphase = 0.1, deg2rad(1.0)
 
-σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
+NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
+NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
 
-shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
-shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
-shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
+σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
 
 precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
 
 σNLK, σNML = σTX, σTX
 
-datatypes=(:amp, :phase)
+do_amp = parse(Bool, get(ENV, "DO_AMP", "true"))
+do_phase = parse(Bool, get(ENV, "DO_PHASE", "true"))
 
-statetypes=(:xy, :rx)
+datatypes = ()
+
+if do_amp 
+    datatypes = (datatypes..., :amp)
+end
+
+if do_phase
+    datatypes = (datatypes..., :phase)
+end
+
+do_tx = parse(Bool, get(ENV, "DO_TX", "true"))
+do_xy = parse(Bool, get(ENV, "DO_XY", "true")) #These sets are for the tx power testing.
+do_rx = parse(Bool, get(ENV, "DO_RX", "false"))
+
+statetypes = ()
+
+if do_xy
+    statetypes = (statetypes..., :xy)
+end
+
+if do_tx
+    statetypes = (statetypes..., :tx)
+end
+
+if do_rx
+    statetypes = (statetypes..., :rx)
+end
+
+@info "statetypes: " statetypes
+
+
+TX_range = parse(Float64, get(ENV, "TX_RANGE_KW", "500")) * 1000 #convert to watts
+
+const NML_LOWER = max(1, NMLb - TX_range/2)
+const NML_UPPER = NMLb + TX_range/2
+const NLK_LOWER = max(1, NLKb - TX_range/2)
+const NLK_UPPER = NLKb + TX_range/2
+
 
 ens_size = parse(Int, get(ENV, "ENS_SIZE", "50"))
 ntimes = parse(Int, get(ENV, "ITRS", "1"))
+
+shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
+shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
+shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
 
 ρ = parse(Float64, get(ENV, "RHO","1.1"))
 
@@ -70,6 +111,20 @@ if shuffle_rx || shuffle_xy
     scenario = "rx_offset_$(ntimes)itr_$(ens_size)ens_$(ρ)_daytime_constrAndResamp_shuffled"
 else
     scenario = "rx_offset_$(ntimes)itr_$(ens_size)ens_$(ρ)_daytime_constrAndResamp"
+end
+
+if !(do_amp && do_phase)
+    if do_amp
+        scenario = scenario* "_amp_only"
+    elseif do_phase
+        scenario = scenario * "_phase_only"
+    end 
+end
+
+if do_tx
+    if TX_range != 500*1000.0
+        scenario = scenario * "_tx_constrained_$(TX_range/1000)kW"
+    end
 end
 
 if precondition_rx

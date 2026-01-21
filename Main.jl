@@ -1,4 +1,3 @@
-#Testing
 using Pkg
 Pkg.activate(@__DIR__)
 
@@ -11,6 +10,7 @@ using LinearAlgebra, Distributions
 using Dates
 
 using Base.Threads
+using ProgressMeter
 
 using LMPTools
 
@@ -29,8 +29,11 @@ resdir(d) = joinpath(resdir(), d)
 resdir!(d) = isdir(d) ? RESDIR[] = d : throw(ArgumentError("$(abspath(d)) must be a directory"))
 resdir!() = RESDIR[] = normpath(joinpath(@__DIR__))
 
-"LWPC sometimes fails with low β. Clip the minimum β value to forward models at MIN_BETA."
+"Constrain values to physically realistic (but wide) bounds"
 const MIN_BETA = 0.22
+const MAX_BETA = 0.425
+const MIN_H = 65
+const MAX_H = 80
 
 "Sets size of simulated data - effectively sets the maximum number of LETKF iterations."
 const DATALENGTH = 10
@@ -42,6 +45,8 @@ NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
 NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
 
 σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
+
+precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
 
 σNLK, σNML = σTX, σTX
 
@@ -57,8 +62,6 @@ end
 if do_phase
     datatypes = (datatypes..., :phase)
 end
-
-datatypes=(:amp, :phase)
 
 do_tx = parse(Bool, get(ENV, "DO_TX", "true"))
 do_xy = parse(Bool, get(ENV, "DO_XY", "true")) #These sets are for the tx power testing.
@@ -92,6 +95,7 @@ ntimes = parse(Int, get(ENV, "ITRS", "1"))
 
 shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
 shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
+shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
 
 ρ = parse(Float64, get(ENV, "RHO","1.1"))
 
@@ -123,14 +127,11 @@ if do_tx
     end
 end
 
-@info "Starting " scenario
+if precondition_rx
+    scenario = scenario * "_preconditioned_v2"
+end
 
-parameters() = merge(init_params(), (;data, σamp, σphase, dt, rng, scenario, σNLK, σNML, NLKb, NMLb,
-datatypes, ens_size, ntimes, ρ, statetypes, shuffle_tx, shuffle_xy))
-
-#@unpack ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
-#datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, localization, scenario = parameters()
-
+parameters() = merge(init_params(), (;data, σamp, σphase, dt, rng, scenario, σNLK, σNML, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_rx, shuffle_tx, shuffle_xy, precondition_rx))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 

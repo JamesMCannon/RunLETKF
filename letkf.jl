@@ -76,7 +76,14 @@ function runletkf(parameters)
     
     end
    
-    R = [fill(σamp^2, npaths); fill(σphase^2, npaths)] # Vector is transformed into a diagonal matrix in MVIA
+    R = Float64[]
+    if :amp in datatypes
+        R = [R; fill(σamp^2, npaths)]
+    end
+    if :phase in datatypes
+        R = [R; fill(σphase^2, npaths)]
+    end
+    #R = [fill(σamp^2, npaths); fill(σphase^2, npaths)] # Vector is transformed into a diagonal matrix in MVIA
 
     # Run model
     ym = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, ntimes+1); 

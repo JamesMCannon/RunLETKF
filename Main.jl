@@ -74,36 +74,49 @@ if do_xy
     statetypes = (statetypes..., :xy)
 end
 
+parameters() = init_params()
+
 ### Set TX parameters
 do_tx = parse(Bool, get(ENV, "DO_TX", "false"))
-NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
-NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
-
-σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
-σNLK, σNML = σTX, σTX
-
-TX_range = parse(Float64, get(ENV, "TX_RANGE_KW", "500")) * 1000 #convert to watts
-
-const NML_LOWER = max(1, NMLb - TX_range/2)
-const NML_UPPER = NMLb + TX_range/2
-const NLK_LOWER = max(1, NLKb - TX_range/2)
-const NLK_UPPER = NLKb + TX_range/2
-
-shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
-
-σTXkw = Int(σTX/1000)
 
 if do_tx
+    
+    NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
+    NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
+
+    σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
+    σNLK, σNML = σTX, σTX
+
+    TX_range = parse(Float64, get(ENV, "TX_RANGE_KW", "500")) * 1000 #convert to watts
+
+    const NML_LOWER = max(1, NMLb - TX_range/2)
+    const NML_UPPER = NMLb + TX_range/2
+    const NLK_LOWER = max(1, NLKb - TX_range/2)
+    const NLK_UPPER = NLKb + TX_range/2
+
+    shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
+
+    σTXkw = Int(σTX/1000)
+
     statetypes = (statetypes..., :tx)
+
+    merge!(parameters(), (; σNLK, σNML, shuffle_tx, NLKb, NMLb))
 end
 
 ### Set RX Parameters
 do_rx = parse(Bool, get(ENV, "DO_RX", "false"))
-precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
-shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
-
 if do_rx
+    precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
+    shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
     statetypes = (statetypes..., :rx)
+    if precondition_rx
+        precon_ens_size = parse(Int, get(ENV, "PRECON_ENS_SIZE", "-1")) # Default value means use ens_size
+        if precon_ens_size == -1
+            precon_ens_size = ens_size
+        end
+        merge!(parameters(), (; precon_ens_size))
+    end
+    merge!(parameters(), (; precondition_rx, shuffle_rx))
 end
 
 ### Bring it all together
@@ -144,7 +157,7 @@ if precondition_rx
     scenario = scenario * "_preconditioned_v2"
 end
 
-parameters() = merge(init_params(), (; data, σamp, σphase, dt, rng, scenario, σNLK, σNML, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_rx, shuffle_tx, shuffle_xy, precondition_rx))
+merge!(parameters(), (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy ))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 

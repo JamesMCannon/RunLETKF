@@ -1,16 +1,10 @@
 function runletkf(parameters)
     @unpack scenario, ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
-        datatypes, h0, b0, hB, bB, rng, σamp, σphase, σNML, σNLK, data, itp, 
+        datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, ρ,
         localization, statetypes = parameters()
     @unpack modelproj = common_simulation()
 
-    ρ = get(parameters(), :ρ, 1.1) 
-
-    precondition_rx = get(parameters(),:precondition_rx, false)
-
-    shuffle_tx = get(parameters(),:shuffle_tx, false)
     shuffle_xy = get(parameters(),:shuffle_xy, false)
-    shuffle_rx = get(parameters(),:shuffle_rx, false)
 
     lengthscale = only(modelsteps).lengthscale
 
@@ -53,9 +47,7 @@ function runletkf(parameters)
     xy_state(:b)(t=0) .= b_init
 
     if :tx in statetypes
-
-        NLKb = get(parameters(), :NLKb, 250000)
-        NMLb = get(parameters(), :NMLb, 233000)
+        @unpack σNLK, σNML, shuffle_tx, NLKb, NMLb = parameters()
 
         NMLdistribution = Distributions.Normal(NMLb, σNML) #Nominal values from FWM dictionary
         NLKdistribution = Distributions.Normal(NLKb, σNLK)
@@ -70,7 +62,7 @@ function runletkf(parameters)
     end
 
     if :rx in statetypes
-
+        @unpack precondition_rx, shuffle_rx = parameters()
         rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
         rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size)) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
     
@@ -90,6 +82,7 @@ function runletkf(parameters)
         field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
     
     if precondition_rx
+        @unpack precon_ens_size = parameters()
         start_time = Dates.now()
         @info "Preconditioning RX offsets: " start_time
         ym_precondition = deepcopy(ym(t=0))
@@ -103,8 +96,8 @@ function runletkf(parameters)
             #outer set of ensembles, split to become new "forward models"
 
             #ens_size here is the inner set of ensembles used on each of the outer set.
-            loc_rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
-            loc_rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size)) 
+            loc_rx_phi_offset = KeyedArray(fill(NaN,npaths,precon_ens_size,ntimes+1), path = pathname.(paths), ens=1:precon_ens_size, t=0:ntimes)
+            loc_rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, precon_ens_size)) 
             #Pulls a new set of samples for each outer ensemble member, IE the inner ensembles should be different across outer ensemble members
             loc_ym_precondition = deepcopy(ym)
 
@@ -165,7 +158,7 @@ function runletkf(parameters)
     elseif :rx in statetypes && :xy in statetypes && :tx in statetypes
         state = (; xy_state, tx_pwrs, rx_phi_offset)
     else 
-        state = (; xy_state) #TODO refactor to (; xy_state) - requires functions in MVIA
+        state = (; xy_state) 
     end
 
     forward_model =

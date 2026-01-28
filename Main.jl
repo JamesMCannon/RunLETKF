@@ -74,7 +74,8 @@ if do_xy
     statetypes = (statetypes..., :xy)
 end
 
-parameters() = init_params()
+params = init_params()
+parameters() = params
 
 ### Set TX parameters
 do_tx = parse(Bool, get(ENV, "DO_TX", "false"))
@@ -100,7 +101,7 @@ if do_tx
 
     statetypes = (statetypes..., :tx)
 
-    merge!(parameters(), (; σNLK, σNML, shuffle_tx, NLKb, NMLb))
+    params = merge(params, (; σNLK, σNML, shuffle_tx, NLKb, NMLb))
 end
 
 ### Set RX Parameters
@@ -114,9 +115,9 @@ if do_rx
         if precon_ens_size == -1
             precon_ens_size = ens_size
         end
-        merge!(parameters(), (; precon_ens_size))
+        params = merge(params, (; precon_ens_size))
     end
-    merge!(parameters(), (; precondition_rx, shuffle_rx))
+    params = merge(params, (; precondition_rx, shuffle_rx))
 end
 
 ### Bring it all together
@@ -157,7 +158,7 @@ if precondition_rx
     scenario = scenario * "_preconditioned_v2"
 end
 
-merge!(parameters(), (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy ))
+params = merge(params, (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy ))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 

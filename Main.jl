@@ -115,7 +115,12 @@ if do_rx
         if precon_ens_size == -1
             precon_ens_size = ens_size
         end
-        params = merge(params, (; precon_ens_size))
+        precon_itrs = parse(Int, get(ENV, "PRECON_ITRS", "-1"))
+        if precon_itrs == -1
+            precon_itrs = ntimes
+        end
+        do_dual = parse(Bool, get(ENV, "DO_DUAL", "false"))
+        params = merge(params, (; precon_ens_size, precon_itrs))
     end
     params = merge(params, (; precondition_rx, shuffle_rx))
 end
@@ -163,4 +168,16 @@ params = merge(params, (; data, σamp, σphase, dt, rng, scenario, datatypes, en
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 
 ### Run LETKF here
-state, data, ym = runletkf(parameters)
+
+if do_rx
+    if do_dual
+        @info "Running Dual LETKF"
+        state, data, ym = runletkf_dual(parameters)
+    else
+        @info "Running LETKF with RX offsets"
+        state, data, ym = runletkf(parameters)
+    end
+else
+    @info "Running LETKF without RX offsets"
+    state, data, ym = runletkf(parameters)
+end

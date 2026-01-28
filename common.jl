@@ -152,3 +152,15 @@ function common_simulation()
 end
 
 
+function window_start(x::Int, i::Int, w::Int)
+    @assert 1 ≤ i ≤ x "Index i out of bounds"
+    @assert 1 ≤ w ≤ x "Window width w invalid"
+
+    half = (w - 1) ÷ 2
+    start = i - half
+
+    # Clamp to valid range while preserving window width
+    start = max(1, min(start, x - w + 1))
+
+    return start
+end

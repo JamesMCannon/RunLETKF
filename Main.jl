@@ -141,7 +141,21 @@ end
 
 scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)_"
 
-if shuffle_tx || shuffle_rx || shuffle_xy
+check = false
+if do_tx
+    if shuffle_tx
+        check=true
+    end
+end
+if do_rx
+    if shuffle_rx
+        check=true
+    end
+end
+if shuffle_xy
+    check=true
+end
+if check
     scenario = scenario * "shuffle_"
 end
 
@@ -159,8 +173,14 @@ if do_tx
     end
 end
 
-if precondition_rx
-    scenario = scenario * "_preconditioned_v2"
+if do_rx
+    if precondition_rx
+        if do_dual
+            scenario = scenario*"_dual_$(precon_itrs)dualitrs_$(precon_ens_size)dualens"
+        else
+            scenario = scenario * "_preconditioned_v2"
+        end
+    end
 end
 
 params = merge(params, (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy ))
@@ -172,7 +192,7 @@ isdir(resdir(scenario)) || mkdir(resdir(scenario))
 if do_rx
     if do_dual
         @info "Running Dual LETKF"
-        state, data, ym = runletkf_dual(parameters)
+        state, data, ym = rundualletkf(parameters)
     else
         @info "Running LETKF with RX offsets"
         state, data, ym = runletkf(parameters)

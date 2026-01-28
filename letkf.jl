@@ -385,6 +385,8 @@ function rundualletkf(parameters)
     xy_state(:h)(t=0) .= h_init
     xy_state(:b)(t=0) .= b_init
 
+    state = (; xy_state)
+
     if :tx in statetypes
         @unpack σNLK, σNML, shuffle_tx, NLKb, NMLb = parameters()
 
@@ -398,6 +400,8 @@ function rundualletkf(parameters)
 
         tx_pwrs(:NML)(t=0) .= NML_init
         tx_pwrs(:NLK)(t=0) .= NLK_init
+
+        state = merge(state, (; tx_pwrs))
     end
 
     if :rx in statetypes
@@ -405,6 +409,7 @@ function rundualletkf(parameters)
         rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
         rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size)) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
         μ_ϕ_statistics = KeyedArray(fill(NaN,4,npaths,precon_itrs+ntimes+1), ϕ_off=0:3, path = pathname.(paths), t=0:precon_itrs+ntimes)
+        state = merge(state, (; rx_phi_offset))
     end
    
     R = Float64[]
@@ -610,7 +615,7 @@ function rundualletkf(parameters)
         Y(:phase) .= phasediff.(ym(t=i-1,field=:phase), ybar(:phase))
 
         xnew_xy = xy_state_update(xold.xy_state, ym(t=i-1), ybar, Y, R;
-            ρ=1.1, localization=nothing, datatypes::Tuple=(:amp, :phase))
+            ρ=ρ, localization=localization, datatypes=datatypes)
 
         xnew = (; xy_state=xnew_xy) 
 

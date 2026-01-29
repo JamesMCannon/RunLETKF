@@ -614,7 +614,7 @@ function rundualletkf(parameters)
         Y(:amp) .= ym(t=i-1,field=:amp) .- ybar(:amp)
         Y(:phase) .= phasediff.(ym(t=i-1,field=:phase), ybar(:phase))
 
-        xnew_xy = xy_state_update(xold.xy_state, ym(t=i-1), ybar, Y, R;
+        xnew_xy = MVIA.xy_state_update(xold.xy_state, ym(t=i-1), ybar, Y, R;
             ρ=ρ, localization=localization, datatypes=datatypes)
 
         xnew = (; xy_state=xnew_xy) 

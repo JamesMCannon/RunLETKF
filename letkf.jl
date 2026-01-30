@@ -590,7 +590,7 @@ function rundualletkf(parameters)
                 μ_ϕ_statistics(t = ((i-1) * precon_itrs) + tt) .= dropdims(mean(ϕ_statistics(t=tt), dims=:ens),dims=:ens)
             end
 
-            jldsave(joinpath(resdir(scenario), "$(scenario)_preconOffsets.jld2"); μ_ϕ_statistics) #TODO save ym_precondition as well?
+            jldsave(joinpath(resdir(scenario), "$(scenario)_dualOffsets.jld2"); μ_ϕ_statistics) #TODO save ym_precondition as well?
     
             for p in μ_ϕ_statistics.path
                 probs = Array(parent(parent(μ_ϕ_statistics(path=p, t=(i*precon_itrs)))))           
@@ -614,7 +614,7 @@ function rundualletkf(parameters)
         Y(:amp) .= ym(t=i-1,field=:amp) .- ybar(:amp)
         Y(:phase) .= phasediff.(ym(t=i-1,field=:phase), ybar(:phase))
 
-        xnew_xy = MVIA.xy_state_update(xold.xy_state, ym(t=i-1), ybar, Y, R;
+        xnew_xy = MVIA.xy_state_update(xold.xy_state, data(t=i), ybar, Y, R;
             ρ=ρ, localization=localization, datatypes=datatypes)
 
         xnew = (; xy_state=xnew_xy) 

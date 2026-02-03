@@ -505,7 +505,7 @@ function rundualletkf(parameters)
                 error("More dual filter iterations specified than data time steps available")
             end
 
-            data_start_idx = window_start(length(data.t), i, precon_itrs) - 1 #subtract 1 because the subsequent loop adds the time index starting from 1
+            data_start_idx = window_start(length(data.t), i, precon_itrs)
     
             ym_precondition = deepcopy(ym(t=i-1))            
 
@@ -533,57 +533,8 @@ function rundualletkf(parameters)
 
             @showprogress Threads.@threads for e in ym_precondition.ens
                 #outer set of ensembles, split to become new "forward models"
-
-                #precon_ens_size here is the inner set of ensembles used on each of the outer set.
-                loc_rx_phi_offset = KeyedArray(fill(NaN, npaths, precon_ens_size, precon_itrs+1), path = pathname.(paths), ens=1:precon_ens_size, t=0:precon_itrs)
-
-                for p in initial_ϕ_statistics.path
-                    probs = Array(parent(parent(initial_ϕ_statistics(path=p))))           
-                    dist  = Categorical(probs)
-
-                    loc_rx_phi_offset(path=p, t=0) .= rand(dist, precon_ens_size) .- 1
-                    #Pulls a new set of samples for each outer ensemble member, IE the inner ensembles should be different across outer ensemble members
-                end
-
-                loc_ym_precondition = KeyedArray(Array{Float64,4}(undef, 2, npaths, precon_ens_size, precon_itrs+1); 
-                    field=[:amp, :phase], path=pathname.(paths), ens=1:precon_ens_size, t=0:precon_itrs)
-
-                for t in loc_ym_precondition.t
-                    for ee in loc_ym_precondition.ens
-                        #Set each of the inner ensemble members to the current out ensemble member's ym. Each of these will be modified by the local RX offset, ie, G(b)
-                        loc_ym_precondition(t=t, ens=ee) .= ym_precondition(ens=e)
-                    end
-                end
-
-
-                for dual_i in 1:maximum(loc_ym_precondition.t)
-                    
-                    ### G(b)
-                    for ee in loc_rx_phi_offset.ens
-                        loc_ym_precondition(field=:phase, ens=ee, t=dual_i-1) .+= loc_rx_phi_offset(ens=ee,t=dual_i-1) .* (π/2)
-                    end
-
-                    ybar = mean(loc_ym_precondition(t=dual_i-1), dims=:ens)
-
-                    Y = similar(loc_ym_precondition(t=dual_i-1))
-                    Y(:amp) .= loc_ym_precondition(t=dual_i-1,field=:amp) .- ybar(:amp)
-                    Y(:phase) .= phasediff.(loc_ym_precondition(t=dual_i-1,field=:phase), ybar(:phase))
-                    #Currently, MVIA.rx_phi_offset() assumes amplitude and phase data. 
-
-                    #Y = MVIA.phasediff.(loc_ym_precondition(:phase), ybar(:phase)) #Exclude amplitude in constructing Y matrix
-                    xnew_phi = MVIA.rx_phi_update(loc_rx_phi_offset(t=dual_i-1), data(t=data_start_idx+dual_i), ybar, Y, R; ρ=ρ)
-                    loc_rx_phi_offset(t=dual_i) .= mod.(round.(xnew_phi), 4)
-                    for p in ϕ_statistics.path
-
-                        vals = parent(loc_rx_phi_offset(t=dual_i, path=p))
-                        N = length(vals)
-
-                        ratios = [count(==(off), vals) / N for off in ϕ_statistics.ϕ_off]
-
-                        ϕ_statistics(path=p, ens=e, t=dual_i) .= ratios
-                    end
-                end
-
+                inner_rx_filter!(ym_precondition(ens=e), initial_ϕ_statistics, ϕ_statistics(ens=e), data(t=data_start_idx:data_start_idx+precon_itrs), 
+                    precon_ens_size, precon_itrs, R, ρ)
             end
 
             for tt in 1:precon_itrs
@@ -714,4 +665,81 @@ function rundualletkf(parameters)
     jldsave(joinpath(resdir(scenario), "$scenario.jld2"); state, data, ym)
 
     return state, data, ym
+end
+
+
+
+function inner_rx_filter!(ym_precondition, initial_ϕ_statistics, ϕ_statistics, data, 
+    precon_ens_size, precon_itrs, R, ρ) 
+    #TODO Refactor ϕ_statistics such that initial_ϕ_statistics is not needed as a separate variable
+    #TODO Rename variables away from "precondition" since this is now part of dual filter rather than preconditioning step
+    
+    paths = buildpaths()
+    npaths = length(paths)
+
+    # Allocate local RX offsets (inner ensembles)
+    loc_rx_phi_offset = KeyedArray(fill(NaN, npaths, precon_ens_size, precon_itrs + 1),
+        path = pathname.(paths),
+        ens  = 1:precon_ens_size,
+        t    = 0:precon_itrs
+    )
+
+    # Sample initial offsets for inner ensembles
+    for p in initial_ϕ_statistics.path
+        probs = Array(parent(parent(initial_ϕ_statistics(path=p))))
+        dist  = Categorical(probs)
+        loc_rx_phi_offset(path=p, t=0) .= rand(dist, precon_ens_size) .- 1
+    end
+
+    # Local preconditioned forward model
+    loc_ym_precondition = KeyedArray(
+        Array{Float64,4}(undef, 2, npaths, precon_ens_size, precon_itrs + 1),
+        field = [:amp, :phase],
+        path  = pathname.(paths),
+        ens   = 1:precon_ens_size,
+        t     = 0:precon_itrs
+    )
+
+    # Initialize all inner ensembles from outer ensemble member `e`
+    for t in loc_ym_precondition.t
+        for ee in loc_ym_precondition.ens
+            loc_ym_precondition(t=t, ens=ee) .= ym_precondition
+        end
+    end
+
+    # Dual filter iterations
+    for dual_i in 1:maximum(loc_ym_precondition.t)
+
+        ## G(b): apply RX phase offsets
+        for ee in loc_rx_phi_offset.ens
+            loc_ym_precondition(field=:phase, ens=ee, t=dual_i-1) .+=
+                loc_rx_phi_offset(ens=ee, t=dual_i-1) .* (π/2)
+        end
+
+        ybar = mean(loc_ym_precondition(t=dual_i-1), dims=:ens)
+
+        Y = similar(loc_ym_precondition(t=dual_i-1))
+        Y(:amp)   .= loc_ym_precondition(t=dual_i-1, field=:amp)   .- ybar(:amp)
+        Y(:phase) .= phasediff.(loc_ym_precondition(t=dual_i-1, field=:phase),
+            ybar(:phase))
+
+        #Currently, MVIA.rx_phi_offset() assumes amplitude and phase data. 
+        #Y = MVIA.phasediff.(loc_ym_precondition(:phase), ybar(:phase)) #Exclude amplitude in constructing Y matrix
+
+        tkey = data.t[dual_i] #assumes windowed data of size at least precon_itrs
+        xnew_phi = MVIA.rx_phi_update(loc_rx_phi_offset(t=dual_i-1),
+            data(t=tkey), ybar, Y, R; ρ = ρ)
+
+        loc_rx_phi_offset(t=dual_i) .= mod.(round.(xnew_phi), 4)
+
+        # Update statistics
+        for p in ϕ_statistics.path
+            vals = parent(loc_rx_phi_offset(t=dual_i, path=p))
+            N = length(vals)
+            ratios = [count(==(off), vals) / N for off in ϕ_statistics.ϕ_off]
+            ϕ_statistics(path=p, t=dual_i) .= ratios
+        end
+    end
+
+    return nothing
 end

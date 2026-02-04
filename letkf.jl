@@ -408,7 +408,7 @@ function rundualletkf(parameters)
         @unpack precondition_rx, shuffle_rx = parameters()
         rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
         rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size)) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
-        μ_ϕ_statistics = KeyedArray(fill(NaN,4,npaths,precon_itrs+ntimes+1), ϕ_off=0:3, path = pathname.(paths), t=0:precon_itrs+ntimes)
+        μ_ϕ_statistics = KeyedArray(fill(NaN,4,npaths,precon_itrs*ntimes+1), ϕ_off=0:3, path = pathname.(paths), t=0:precon_itrs*ntimes)
         state = merge(state, (; rx_phi_offset))
     end
    

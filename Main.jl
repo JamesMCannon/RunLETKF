@@ -7,7 +7,7 @@ using LongwaveModePropagator
 using LongwaveModePropagator: QE, ME, waitsparameter
 using AxisKeys, StableRNGs, Parameters, Random
 using ScatteredInterpolation, Proj 
-using LinearAlgebra, Distributions
+using LinearAlgebra, Distributions, StatsBase
 using Dates
 
 using Base.Threads

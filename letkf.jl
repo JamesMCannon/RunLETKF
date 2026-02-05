@@ -387,6 +387,13 @@ function rundualletkf(parameters)
 
     state = (; xy_state)
 
+    if :tx in statetypes || :rx in statetypes
+        @unpack precon_ens_size, precon_itrs = parameters()
+            if precon_itrs > length(data.t)
+                error("More dual filter iterations specified than data time steps available")
+            end
+    end
+
     if :tx in statetypes
         @unpack σNLK, σNML, shuffle_tx, NLKb, NMLb = parameters()
 
@@ -398,6 +405,13 @@ function rundualletkf(parameters)
 
         tx_pwrs = KeyedArray(fill(NaN,2, ens_size, ntimes+1), pwrs = [:NML, :NLK], ens=1:ens_size, t=0:ntimes)
 
+        dual_tx_pwrs = KeyedArray(fill(NaN,2, ens_size, precon_ens_size, precon_itrs*ntimes+1), pwrs = [:NML, :NLK], ens=1:ens_size, dual_ens=1:precon_ens_size, t=0:precon_itrs*ntimes)
+
+        for e in dual_tx_pwrs.ens
+            dual_tx_pwrs(pwrs=:NML, ens=e, t=0) .= rand(NMLdistribution, precon_ens_size)
+            dual_tx_pwrs(pwrs=:NLK, ens=e, t=0) .= rand(NLKdistribution, precon_ens_size)
+        end
+
         tx_pwrs(:NML)(t=0) .= NML_init
         tx_pwrs(:NLK)(t=0) .= NLK_init
 
@@ -408,7 +422,10 @@ function rundualletkf(parameters)
         @unpack precondition_rx, shuffle_rx = parameters()
         rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
         rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size)) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
-        μ_ϕ_statistics = KeyedArray(fill(NaN,4,npaths,precon_itrs*ntimes+1), ϕ_off=0:3, path = pathname.(paths), t=0:precon_itrs*ntimes)
+        if precondition_rx #Assumed true if :rx in statetypes for dual LETKF. If statement kept in for future flexibility.
+            @unpack precon_ens_size, precon_itrs = parameters()
+            μ_ϕ_statistics = KeyedArray(fill(NaN,4,npaths,precon_itrs*ntimes+1), ϕ_off=0:3, path = pathname.(paths), t=0:precon_itrs*ntimes)
+        end
         state = merge(state, (; rx_phi_offset))
     end
    
@@ -494,18 +511,54 @@ function rundualletkf(parameters)
         end
 
         ensemble_model!(ym(t=i-1), basic_forward_model, (; xy_state)) #ym(t-1) updated here
+        if :tx in statetypes or :rx in statetypes
+            data_start_idx = window_start(length(data.t), i, precon_itrs)
+        end
 
-        if :rx in statetypes
-            #TODO move as much of this as possible to a separate function
-            start_rx_time = Dates.now()
-            @info "Filtering RX offsets: " start_rx_time
+        if :tx in statetypes
+            start_tx_time = Dates.now()
+            @info "Filtering TX powers: " start_tx_time
+            ym_precondition = deepcopy(ym(t=i-1))
 
-            @unpack precon_ens_size, precon_itrs = parameters()
-            if precon_itrs > length(data.t)
-                error("More dual filter iterations specified than data time steps available")
+            @showprogress Threads.@threads for e in ym_precondition.ens
+                #outer set of ensembles, split to become new "forward models"
+                #mutates dual_tx_pwrs with final estimate being stored at t = precon_itrs*ntimes
+                inner_tx_filter!(ym_precondition(ens=e), data(t=data_start_idx:data_start_idx+precon_itrs), 
+                    precon_ens_size, precon_itrs, R, ρ, dual_tx_pwrs(ens=e), paths=paths)
             end
 
-            data_start_idx = window_start(length(data.t), i, precon_itrs)
+            jldsave(joinpath(resdir(scenario), "$(scenario)_dual_TXOffsets.jld2"); dual_tx_pwrs)
+
+            for tx in dual_tx_pwrs.pwrs
+                state.tx_pwrs(pwrs=tx, t=i) .= sample_values(dual_tx_pwrs(pwrs=tx, t=precon_itrs*ntimes), ens_size)
+            end
+
+            if :tx in statetypes #TODO perhaps change this to pass TX_range to parameters rather than assign 4 consts.
+                state.tx_pwrs(:NLK)(t=i)[state.tx_pwrs(:NLK, t=i) .< NLK_LOWER] .= NLK_LOWER
+                state.tx_pwrs(:NLK)(t=i)[state.tx_pwrs(:NLK, t=i) .> NLK_UPPER] .= NLK_UPPER
+                state.tx_pwrs(:NML)(t=i)[state.tx_pwrs(:NML, t=i) .< NML_LOWER] .= NML_LOWER
+                state.tx_pwrs(:NML)(t=i)[state.tx_pwrs(:NML, t=i) .> NML_UPPER] .= NML_UPPER
+            end
+
+            ## G(b): apply TX power offsets
+            for e in state.tx_pwrs.ens
+                for tx in state.tx_pwrs.pwrs
+                    txpaths = pathnames[startswith.(pathnames, String(tx) * "-")]
+
+                    Δpwr_log = log10(state.tx_pwrs(pwrs=tx, ens=e, t=i) / txpower(paths, String(tx)))
+                    ym(field=:amp, ens=e, t=i-1, path=txpaths) .+= Δpwr_log * 10  #10 dB per decade
+                end
+            end
+
+            @info "Elapsed" Δt=canonicalize(Dates.now() - start_tx_time)
+
+        end
+
+
+        if :rx in statetypes
+            #No additional checks necessary; if :rx is in statetypes and this function is called, precondition_rx must be true
+            start_rx_time = Dates.now()
+            @info "Filtering RX offsets: " start_rx_time
     
             ym_precondition = deepcopy(ym(t=i-1))            
 
@@ -541,7 +594,7 @@ function rundualletkf(parameters)
                 μ_ϕ_statistics(t = ((i-1) * precon_itrs) + tt) .= dropdims(mean(ϕ_statistics(t=tt), dims=:ens),dims=:ens)
             end
 
-            jldsave(joinpath(resdir(scenario), "$(scenario)_dualOffsets.jld2"); μ_ϕ_statistics) #TODO save ym_precondition as well?
+            jldsave(joinpath(resdir(scenario), "$(scenario)_dual_RXOffsets.jld2"); μ_ϕ_statistics) #TODO save ym_precondition as well?
     
             for p in μ_ϕ_statistics.path
                 probs = Array(parent(parent(μ_ϕ_statistics(path=p, t=(i*precon_itrs)))))           
@@ -557,6 +610,7 @@ function rundualletkf(parameters)
             end
 
             @info "Elapsed" Δt=canonicalize(Dates.now() - start_rx_time)
+
         end
 
         ybar = mean(ym(t=i-1), dims=:ens)
@@ -630,13 +684,7 @@ function rundualletkf(parameters)
 
         state.xy_state(t=i) .= xnew.xy_state
 
-        if :tx in statetypes #TODO perhaps change this to pass TX_range to parameters rather than assign 4 consts.
-            xnew.tx_pwrs(:NLK)[xnew.tx_pwrs(:NLK) .< NLK_LOWER] .= NLK_LOWER
-            xnew.tx_pwrs(:NLK)[xnew.tx_pwrs(:NLK) .> NLK_UPPER] .= NLK_UPPER
-            xnew.tx_pwrs(:NML)[xnew.tx_pwrs(:NML) .< NML_LOWER] .= NML_LOWER
-            xnew.tx_pwrs(:NML)[xnew.tx_pwrs(:NML) .> NML_UPPER] .= NML_UPPER
-            state.tx_pwrs(t=i) .= xnew.tx_pwrs
-        end
+
 
         @info "Elapsed" Δt=canonicalize(Dates.now() - start_time)
         jldsave(joinpath(resdir(scenario), "$scenario.jld2"); state, data, ym)
@@ -738,6 +786,70 @@ function inner_rx_filter!(ym_precondition, initial_ϕ_statistics, ϕ_statistics,
             N = length(vals)
             ratios = [count(==(off), vals) / N for off in ϕ_statistics.ϕ_off]
             ϕ_statistics(path=p, t=dual_i) .= ratios
+        end
+    end
+
+    return nothing
+end
+
+
+function inner_tx_filter!(ym_precondition, dual_tx_pwrs, data, 
+    precon_ens_size, precon_itrs, R, ρ; paths=buildtruepaths()) 
+    #dual_tx_pwrs: KeyedArray of size (2, precon_ens_size, precon_itrs+1) with pwrs=:NML,:NLK
+    
+    npaths = length(paths)
+
+    # Local preconditioned forward model
+    loc_ym_precondition = KeyedArray(
+        Array{Float64,4}(undef, 2, npaths, precon_ens_size, precon_itrs + 1),
+        field = [:amp, :phase],
+        path  = pathname.(paths),
+        ens   = 1:precon_ens_size,
+        t     = 0:precon_itrs
+    )
+
+    # Initialize all inner ensembles from outer ensemble member `e`
+    for t in loc_ym_precondition.t
+        for ee in loc_ym_precondition.ens
+            loc_ym_precondition(t=t, ens=ee) .= ym_precondition
+        end
+    end
+
+    loc_tx_pwrs = KeyedArray(fill(NaN,2, precon_ens_size, precon_itrs+1), pwrs = [:NML, :NLK], ens=1:precon_ens_size, t=0:precon_itrs)
+    #needed because tx_pwrs_update requires structure with dimesion ens, not dual_ens. Currently keeping both so dual_tx_pwrs can be mutated for all ensembles.
+    pathnames = pathname.(paths)
+
+    # Dual filter iterations
+    for dual_i in 1:maximum(loc_ym_precondition.t)
+        ## G(b): apply RX phase offsets
+        for ee in dual_tx_pwrs.dual_ens
+            for tx in dual_tx_pwrs.pwrs
+                txpaths = pathnames[startswith.(pathnames, String(tx) * "-")]
+
+                Δpwr_log = log10(dual_tx_pwrs(pwrs=tx, dual_ens=ee, t=dual_i-1) / txpower(paths, String(tx)))
+                loc_ym_precondition(field=:amp, ens=ee, t=dual_i-1, path=txpaths) .+= Δpwr_log * 10  #10 dB per decade
+
+            end
+        end
+
+        ybar = mean(loc_ym_precondition(t=dual_i-1), dims=:ens)
+
+        Y = similar(loc_ym_precondition(t=dual_i-1))
+        Y(:amp)   .= loc_ym_precondition(t=dual_i-1, field=:amp)   .- ybar(:amp)
+        Y(:phase) .= phasediff.(loc_ym_precondition(t=dual_i-1, field=:phase),
+            ybar(:phase))
+
+        #Currently, MVIA.rx_phi_offset() assumes amplitude and phase data. 
+
+        for tx in dual_tx_pwrs.pwrs
+            loc_tx_pwrs(pwrs=tx, t=dual_i-1) .= dual_tx_pwrs(pwrs=tx, t=dual_i-1)
+        end
+
+        tkey = data.t[dual_i] #assumes windowed data of size at least precon_itrs
+        xnew_amp = MVIA.tx_pwrs_update(loc_tx_pwrs(t=dual_i-1), data(t=tkey), ybar, Y, R; ρ = ρ)
+
+        for tx in dual_tx_pwrs.pwrs
+            dual_tx_pwrs(pwrs=tx, t=dual_i) .= xnew_amp(pwrs=tx)
         end
     end
 

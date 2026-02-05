@@ -49,6 +49,20 @@ function buildtruepaths()
     return paths
 end
 
+function txpower(paths, txname::AbstractString)
+    for (tx, _) in paths
+        tx.name == txname && return tx.power
+    end
+    error("No transmitter found with name = $txname")
+end
+
+
+function sample_values(A::KeyedArray, n::Int; rng=Random.default_rng())
+    data = parent(A)              # raw Array
+    idx = sample(rng, eachindex(data), n, replace=false)
+    return data[idx]
+end
+
 """
 observations(name,σamp, σphase)
 

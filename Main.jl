@@ -79,7 +79,7 @@ parameters() = params
 
 ### Set TX parameters
 do_tx = parse(Bool, get(ENV, "DO_TX", "false"))
-
+precondition_tx = parse(Bool, get(ENV, "PRECONDITION_TX", "false"))
 if do_tx
     
     NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
@@ -99,6 +99,19 @@ if do_tx
 
     σTXkw = Int(σTX/1000)
 
+    if precondition_tx #theres got to be a better way to do this...
+        precon_ens_size = parse(Int, get(ENV, "PRECON_ENS_SIZE", "-1")) # Default value means use ens_size
+        if precon_ens_size == -1
+            precon_ens_size = ens_size
+        end
+        precon_itrs = parse(Int, get(ENV, "PRECON_ITRS", "-1"))
+        if precon_itrs == -1
+            precon_itrs = ntimes
+        end
+        do_dual = parse(Bool, get(ENV, "DO_DUAL", "false"))
+        params = merge(params, (; precon_ens_size, precon_itrs))
+    end
+
     statetypes = (statetypes..., :tx)
 
     params = merge(params, (; σNLK, σNML, shuffle_tx, NLKb, NMLb))
@@ -106,11 +119,11 @@ end
 
 ### Set RX Parameters
 do_rx = parse(Bool, get(ENV, "DO_RX", "false"))
+precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
 if do_rx
-    precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
     shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
     statetypes = (statetypes..., :rx)
-    if precondition_rx
+    if precondition_rx && !precondition_tx #theres got to be a better way to do this...
         precon_ens_size = parse(Int, get(ENV, "PRECON_ENS_SIZE", "-1")) # Default value means use ens_size
         if precon_ens_size == -1
             precon_ens_size = ens_size
@@ -170,34 +183,35 @@ end
 if do_tx
     if TX_range != 500*1000.0
         scenario = scenario * "_tx_constrained_$(TX_range/1000)kW"
+    else
+        scenario = scenario * "_tx"
     end
 end
 
 if do_rx
-    if precondition_rx
-        if do_dual
-            scenario = scenario*"_dual_$(precon_itrs)dualitrs_$(precon_ens_size)dualens"
-        else
-            scenario = scenario * "_preconditioned_v2"
-        end
-    end
+    scenario = scenario * "_rx"
 end
 
+if precondition_rx || precondition_tx
+    if do_dual
+        scenario = scenario*"_dual_$(precon_itrs)dualitrs_$(precon_ens_size)dualens"
+    else
+        scenario = scenario * "_preconditioned_v2"
+    end
+end
 params = merge(params, (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy ))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 
 ### Run LETKF here
 
-if do_rx
-    if do_dual
-        @info "Running Dual LETKF"
-        state, data, ym = rundualletkf(parameters)
-    else
-        @info "Running LETKF with RX offsets"
-        state, data, ym = runletkf(parameters)
-    end
+
+if do_dual
+    @info "Running Dual LETKF"
+    state, data, ym = rundualletkf(parameters)
 else
-    @info "Running LETKF without RX offsets"
+    @info "Running LETKF"
     state, data, ym = runletkf(parameters)
 end
+
+

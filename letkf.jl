@@ -511,7 +511,7 @@ function rundualletkf(parameters)
         end
 
         ensemble_model!(ym(t=i-1), basic_forward_model, (; xy_state)) #ym(t-1) updated here
-        if :tx in statetypes or :rx in statetypes
+        if :tx in statetypes || :rx in statetypes
             data_start_idx = window_start(length(data.t), i, precon_itrs)
         end
 

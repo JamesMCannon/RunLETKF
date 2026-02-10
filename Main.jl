@@ -186,6 +186,7 @@ if do_tx
     else
         scenario = scenario * "_tx"
     end
+    scenario = scenario * "_log10"
 end
 
 if do_rx

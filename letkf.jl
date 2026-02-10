@@ -349,7 +349,8 @@ function rundualletkf(parameters)
 
     paths = buildtruepaths()
     npaths = length(paths)
-    
+    pathnames = pathname.(paths)
+
     gridshape = (length(y_grid), length(x_grid))  # useful later
     
     CI = CartesianIndices(gridshape)
@@ -437,7 +438,7 @@ function rundualletkf(parameters)
         R = [R; fill(σphase^2, npaths)]
     end
 
-    # Run model
+    # Define model
     ym = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, ntimes+1); 
         field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
 
@@ -523,23 +524,23 @@ function rundualletkf(parameters)
             @showprogress Threads.@threads for e in ym_precondition.ens
                 #outer set of ensembles, split to become new "forward models"
                 #mutates dual_tx_pwrs with final estimate being stored at t = precon_itrs*ntimes
-                inner_tx_filter!(ym_precondition(ens=e), data(t=data_start_idx:data_start_idx+precon_itrs), 
-                    precon_ens_size, precon_itrs, R, ρ, dual_tx_pwrs(ens=e), paths=paths)
+                inner_tx_filter!(ym_precondition(ens=e), dual_tx_pwrs(ens=e), data(t=data_start_idx:data_start_idx+precon_itrs), 
+                    precon_ens_size, precon_itrs, R, ρ, i, paths=paths)
             end
 
             jldsave(joinpath(resdir(scenario), "$(scenario)_dual_TXOffsets.jld2"); dual_tx_pwrs)
 
             for tx in dual_tx_pwrs.pwrs
-                state.tx_pwrs(pwrs=tx, t=i) .= sample_values(dual_tx_pwrs(pwrs=tx, t=precon_itrs*ntimes), ens_size)
+                state.tx_pwrs(pwrs=tx, t=i) .= sample_values(dual_tx_pwrs(pwrs=tx, t=precon_itrs*i), ens_size)
             end
 
             if :tx in statetypes #TODO perhaps change this to pass TX_range to parameters rather than assign 4 consts.
-                state.tx_pwrs(:NLK)(t=i)[state.tx_pwrs(:NLK, t=i) .< NLK_LOWER] .= NLK_LOWER
-                state.tx_pwrs(:NLK)(t=i)[state.tx_pwrs(:NLK, t=i) .> NLK_UPPER] .= NLK_UPPER
-                state.tx_pwrs(:NML)(t=i)[state.tx_pwrs(:NML, t=i) .< NML_LOWER] .= NML_LOWER
-                state.tx_pwrs(:NML)(t=i)[state.tx_pwrs(:NML, t=i) .> NML_UPPER] .= NML_UPPER
+                state.tx_pwrs(:NLK)(t=i)[state.tx_pwrs(pwrs = :NLK, t=i) .< NLK_LOWER] .= NLK_LOWER
+                state.tx_pwrs(:NLK)(t=i)[state.tx_pwrs(pwrs = :NLK, t=i) .> NLK_UPPER] .= NLK_UPPER
+                state.tx_pwrs(:NML)(t=i)[state.tx_pwrs(pwrs = :NML, t=i) .< NML_LOWER] .= NML_LOWER
+                state.tx_pwrs(:NML)(t=i)[state.tx_pwrs(pwrs = :NML, t=i) .> NML_UPPER] .= NML_UPPER
             end
-
+            
             ## G(b): apply TX power offsets
             for e in state.tx_pwrs.ens
                 for tx in state.tx_pwrs.pwrs
@@ -794,7 +795,7 @@ end
 
 
 function inner_tx_filter!(ym_precondition, dual_tx_pwrs, data, 
-    precon_ens_size, precon_itrs, R, ρ; paths=buildtruepaths()) 
+    precon_ens_size, precon_itrs, R, ρ, i; paths=buildtruepaths()) 
     #dual_tx_pwrs: KeyedArray of size (2, precon_ens_size, precon_itrs+1) with pwrs=:NML,:NLK
     
     npaths = length(paths)
@@ -821,12 +822,13 @@ function inner_tx_filter!(ym_precondition, dual_tx_pwrs, data,
 
     # Dual filter iterations
     for dual_i in 1:maximum(loc_ym_precondition.t)
+        dual_tx_t_idx = (i-1)*precon_itrs+dual_i
         ## G(b): apply RX phase offsets
         for ee in dual_tx_pwrs.dual_ens
             for tx in dual_tx_pwrs.pwrs
                 txpaths = pathnames[startswith.(pathnames, String(tx) * "-")]
 
-                Δpwr_log = log10(dual_tx_pwrs(pwrs=tx, dual_ens=ee, t=dual_i-1) / txpower(paths, String(tx)))
+                Δpwr_log = log10(dual_tx_pwrs(pwrs=tx, dual_ens=ee, t=dual_tx_t_idx-1) / txpower(paths, String(tx)))
                 loc_ym_precondition(field=:amp, ens=ee, t=dual_i-1, path=txpaths) .+= Δpwr_log * 10  #10 dB per decade
 
             end
@@ -842,14 +844,14 @@ function inner_tx_filter!(ym_precondition, dual_tx_pwrs, data,
         #Currently, MVIA.rx_phi_offset() assumes amplitude and phase data. 
 
         for tx in dual_tx_pwrs.pwrs
-            loc_tx_pwrs(pwrs=tx, t=dual_i-1) .= dual_tx_pwrs(pwrs=tx, t=dual_i-1)
+            loc_tx_pwrs(pwrs=tx, t=dual_i-1) .= log10.(strip(dual_tx_pwrs(pwrs=tx, t=dual_tx_t_idx-1)))
         end
 
         tkey = data.t[dual_i] #assumes windowed data of size at least precon_itrs
         xnew_amp = MVIA.tx_pwrs_update(loc_tx_pwrs(t=dual_i-1), data(t=tkey), ybar, Y, R; ρ = ρ)
 
         for tx in dual_tx_pwrs.pwrs
-            dual_tx_pwrs(pwrs=tx, t=dual_i) .= xnew_amp(pwrs=tx)
+            dual_tx_pwrs(pwrs=tx, t=dual_tx_t_idx) .= 10 .^(strip(xnew_amp(pwrs=tx)))
         end
     end
 

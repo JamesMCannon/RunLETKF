@@ -58,7 +58,7 @@ if do_phase
 end
 do_xy = parse(Bool, get(ENV, "DO_XY", "true")) # Currently, only "true" is supported
 
-ens_size = parse(Int, get(ENV, "ENS_SIZE", "50"))
+ens_size = parse(Int, get(ENV, "ENS_SIZE", "4"))
 ntimes = parse(Int, get(ENV, "ITRS", "1"))
 shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
 
@@ -66,7 +66,17 @@ shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
 
 rng = reset_rng()
 
-data = observations("Inputs/day1",σamp, σphase)
+data = observations("Inputs/day1", σamp, σphase)
+
+if !(:amp in datatypes && :phase in datatypes)
+    if :phase in datatypes
+        data = data[Key([:phase, :phase_noiseless]), :, :]
+    elseif :amp in datatypes
+        data = data[Key([:amp, :amp_noiseless]), :, :]
+    else
+        error("Whoops! Datatypes don't make sense")
+    end
+end
 
 statetypes = ()
 

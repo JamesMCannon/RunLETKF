@@ -615,10 +615,18 @@ function rundualletkf(parameters)
         end
 
         ybar = mean(ym(t=i-1), dims=:ens)
-
-        Y = similar(ym(t=i-1))
-        Y(:amp) .= ym(t=i-1,field=:amp) .- ybar(:amp)
-        Y(:phase) .= phasediff.(ym(t=i-1,field=:phase), ybar(:phase))
+        yb = ym(t=i-1)
+        if :amp in datatypes && :phase in datatypes
+            Y = similar(yb)
+            Y(:amp) .= yb(:amp) .- ybar(:amp)
+            Y(:phase) .= MVIA.phasediff.(yb(:phase), ybar(:phase))
+        elseif :amp in datatypes
+            Y = yb(:amp) .- ybar(:amp)
+        elseif :phase in datatypes
+            Y = MVIA.phasediff.(yb(:phase), ybar(:phase))
+        else
+            error("Unknown datatypes: $datatypes")
+        end
 
         xnew_xy = MVIA.xy_state_update(xold.xy_state, data(t=i), ybar, Y, R;
             ρ=ρ, localization=localization, datatypes=datatypes)

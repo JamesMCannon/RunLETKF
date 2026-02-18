@@ -116,6 +116,7 @@ function init_params()
 
     @unpack west, east, south, north, modelproj = common_simulation()
 
+    dt = DateTime(2020, 3, 1, 20, 00) #using Dates
     pathstep = 50e3 # defined in WGS84
 
     # Setup Grid
@@ -140,9 +141,11 @@ function init_params()
     hB = fill(2,ncells) # σ_h′
     bB = fill(0.04, ncells) # σ_β
 
+    h_off = parse(Float64, get(ENV, "H_OFF", "0"))
+    b_off = parse(Float64, get(ENV, "B_OFF", "0"))
     hb0 = [MVIA.ferguson(ll[2], LMPTools.zenithangle(ll[2], ll[1], dt), dt) for ll in lola]
-    h0 = getindex.(hb0, 1)
-    b0 = getindex.(hb0, 2)
+    h0 = getindex.(hb0, 1) .+ h_off
+    b0 = getindex.(hb0, 2) .+ b_off
 
     @assert length(h0) == length(hB) == ncells
 
@@ -177,4 +180,55 @@ function window_start(x::Int, i::Int, w::Int)
     start = max(1, min(start, x - w + 1))
 
     return start
+end
+
+
+"""
+    first_t_with_agreement(A::KeyedArray, frac; atol=0.0)
+
+Return the first `t` key such that for every path, at least `frac`
+(0–1) of ensemble values at that t are identical.
+
+If none exists, return `nothing`.
+
+`atol` allows approximate matching for floating-point values.
+"""
+function first_t_with_agreement(A, frac; atol=0.0)
+    data = parent(A)
+    npath, nens, nt = size(data)
+
+    tkeys = axiskeys(A, :t)
+
+    frac = float(frac)  # allow Int input like 1
+
+    # maximum multiplicity fraction in vector v
+    function agreement_fraction(v)
+        counts = Dict{Float64,Int}()
+        best = 0
+
+        @inbounds for x in v
+            key = atol == 0 ? x : round(x / atol) * atol
+            c = get!(counts, key, 0) + 1
+            counts[key] = c
+            best = max(best, c)
+        end
+
+        return best / length(v)
+    end
+
+    @inbounds for ti in 1:nt
+        for p in 1:npath
+            v = @view data[p, :, ti]
+
+            if agreement_fraction(v) < frac
+                @goto next_t
+            end
+        end
+
+        return tkeys[ti]
+
+        @label next_t
+    end
+
+    return nothing
 end

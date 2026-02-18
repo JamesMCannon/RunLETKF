@@ -41,11 +41,12 @@ const MAX_H = 90
 const DATALENGTH = 10
 
 ### Set Common parameters
-dt = DateTime(2020, 3, 1, 20, 00) #using Dates
+
 σamp, σphase = 0.1, deg2rad(1.0)
 
 do_amp = parse(Bool, get(ENV, "DO_AMP", "true"))
 do_phase = parse(Bool, get(ENV, "DO_PHASE", "true"))
+xy_file = get(ENV, "XY_FILE","false")
 
 datatypes = ()
 
@@ -210,7 +211,13 @@ if precondition_rx || precondition_tx
         scenario = scenario * "_preconditioned_v2"
     end
 end
-params = merge(params, (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy ))
+
+if xy_file != "false"
+    scenario = scenario * "_xy_file"
+    @info "Background Ionosphere from file"
+end
+
+params = merge(params, (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy, xy_file))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 

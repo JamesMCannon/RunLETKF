@@ -340,7 +340,7 @@ end
 function rundualletkf(parameters)
     @unpack scenario, ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
         datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, ρ,
-        localization, statetypes = parameters()
+        localization, statetypes, xy_file = parameters()
     @unpack modelproj = common_simulation()
 
     shuffle_xy = get(parameters(),:shuffle_xy, false)
@@ -351,40 +351,50 @@ function rundualletkf(parameters)
     npaths = length(paths)
     pathnames = pathname.(paths)
 
-    gridshape = (length(y_grid), length(x_grid))  # useful later
-    
-    CI = CartesianIndices(gridshape)
-
-    xy_grid = densify(x_grid, y_grid)
-    trans = Proj.Transformation(modelproj, wgs84())
-    lola = trans.(parent(parent(xy_grid)))
-
-    distarr = lonlatgrid_dists(lola)
-    gc = gaspari1999_410(distarr, compactlengthscale(lengthscale))
-
-    # We wrap in Symmetric because we know it is. Without it, eigvals of β can be small
-    # (but positive) and still fail the `isposdef` check
-    hdistribution = Distributions.MvNormal(h0, Symmetric(LinearAlgebra.Diagonal(hB)*gc*LinearAlgebra.Diagonal(hB)))  # yes, w/ matrix argument we need variance
-    bdistribution = Distributions.MvNormal(b0, Symmetric(LinearAlgebra.Diagonal(bB)*gc*LinearAlgebra.Diagonal(bB)))
-
-    # Initial ensemble
-    h_init = reshape(rand(rng, hdistribution, ens_size), gridshape..., ens_size)
-    b_init = reshape(rand(rng, bdistribution, ens_size), gridshape..., ens_size)
-     
-    replace!(x->x < MIN_BETA ? MIN_BETA : x, b_init) #TODO Check structure here; GPT thinks this is not an appropriate way to do this
-    replace!(x->x > MAX_BETA ? MAX_BETA : x, b_init) # possible correction: b_init[b_init .< MIN_BETA] .= MIN_BETA
-    replace!(x->x < MIN_H ? MIN_H : x, h_init) 
-    replace!(x->x > MAX_H ? MAX_H : x, h_init)
-
-    locmask = anylocal(localization)
-    h_init[CI[.!locmask],:] .= NaN
-    b_init[CI[.!locmask],:] .= NaN
-
     xy_state = KeyedArray(fill(NaN, 2, length(y_grid), length(x_grid), ens_size, ntimes+1),
-    field=[:h, :b], y=y_grid, x=x_grid, ens=1:ens_size, t=0:ntimes)
+        field=[:h, :b], y=y_grid, x=x_grid, ens=1:ens_size, t=0:ntimes)
 
-    xy_state(:h)(t=0) .= h_init
-    xy_state(:b)(t=0) .= b_init
+    if xy_file == "false"
+        gridshape = (length(y_grid), length(x_grid))  # useful later
+        
+        CI = CartesianIndices(gridshape)
+
+        xy_grid = densify(x_grid, y_grid)
+        trans = Proj.Transformation(modelproj, wgs84())
+        lola = trans.(parent(parent(xy_grid)))
+
+        distarr = lonlatgrid_dists(lola)
+        gc = gaspari1999_410(distarr, compactlengthscale(lengthscale))
+
+        # We wrap in Symmetric because we know it is. Without it, eigvals of β can be small
+        # (but positive) and still fail the `isposdef` check
+        hdistribution = Distributions.MvNormal(h0, Symmetric(LinearAlgebra.Diagonal(hB)*gc*LinearAlgebra.Diagonal(hB)))  # yes, w/ matrix argument we need variance
+        bdistribution = Distributions.MvNormal(b0, Symmetric(LinearAlgebra.Diagonal(bB)*gc*LinearAlgebra.Diagonal(bB)))
+
+        # Initial ensemble
+        h_init = reshape(rand(rng, hdistribution, ens_size), gridshape..., ens_size)
+        b_init = reshape(rand(rng, bdistribution, ens_size), gridshape..., ens_size)
+        
+        replace!(x->x < MIN_BETA ? MIN_BETA : x, b_init) #TODO Check structure here; GPT thinks this is not an appropriate way to do this
+        replace!(x->x > MAX_BETA ? MAX_BETA : x, b_init) # possible correction: b_init[b_init .< MIN_BETA] .= MIN_BETA
+        replace!(x->x < MIN_H ? MIN_H : x, h_init) 
+        replace!(x->x > MAX_H ? MAX_H : x, h_init)
+
+        locmask = anylocal(localization)
+        h_init[CI[.!locmask],:] .= NaN
+        b_init[CI[.!locmask],:] .= NaN
+
+        xy_state(:h)(t=0) .= h_init
+        xy_state(:b)(t=0) .= b_init
+    else
+        background_state = load(xy_file,"state")
+        if background_state.xy_state.ens != 1:ens_size
+            error("Ensemble size mismatch")
+        end
+        init_t = first_t_with_agreement(background_state.rx_phi_offset, 0.85)
+        xy_state(t=0) .= background_state.xy_state(t=init_t+3)
+        @info "Starting with $(init_t+3)th iteration from file"
+    end
 
     state = (; xy_state)
 

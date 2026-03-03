@@ -149,7 +149,7 @@ function init_params()
 
     @assert length(h0) == length(hB) == ncells
 
-    return(;pathstep, modelsteps, x_grid, y_grid, hB, bB, h0, b0, itp, localization)
+    return(;pathstep, modelsteps, x_grid, y_grid, hB, bB, h0, b0, itp, localization, dt)
 end
 
 

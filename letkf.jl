@@ -1,7 +1,7 @@
 function runletkf(parameters)
     @unpack scenario, ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
         datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, ρ,
-        localization, statetypes = parameters()
+        localization, statetypes, xy_file = parameters()
     @unpack modelproj = common_simulation()
 
     shuffle_xy = get(parameters(),:shuffle_xy, false)
@@ -11,40 +11,50 @@ function runletkf(parameters)
     paths = buildtruepaths()
     npaths = length(paths)
     
-    gridshape = (length(y_grid), length(x_grid))  # useful later
-    
-    CI = CartesianIndices(gridshape)
-
-    xy_grid = densify(x_grid, y_grid)
-    trans = Proj.Transformation(modelproj, wgs84())
-    lola = trans.(parent(parent(xy_grid)))
-
-    distarr = lonlatgrid_dists(lola)
-    gc = gaspari1999_410(distarr, compactlengthscale(lengthscale))
-
-    # We wrap in Symmetric because we know it is. Without it, eigvals of β can be small
-    # (but positive) and still fail the `isposdef` check
-    hdistribution = Distributions.MvNormal(h0, Symmetric(LinearAlgebra.Diagonal(hB)*gc*LinearAlgebra.Diagonal(hB)))  # yes, w/ matrix argument we need variance
-    bdistribution = Distributions.MvNormal(b0, Symmetric(LinearAlgebra.Diagonal(bB)*gc*LinearAlgebra.Diagonal(bB)))
-
-    # Initial ensemble
-    h_init = reshape(rand(rng, hdistribution, ens_size), gridshape..., ens_size)
-    b_init = reshape(rand(rng, bdistribution, ens_size), gridshape..., ens_size)
-     
-    replace!(x->x < MIN_BETA ? MIN_BETA : x, b_init) #TODO Check structure here; GPT thinks this is not an appropriate way to do this
-    replace!(x->x > MAX_BETA ? MAX_BETA : x, b_init) # possible correction: b_init[b_init .< MIN_BETA] .= MIN_BETA
-    replace!(x->x < MIN_H ? MIN_H : x, h_init) 
-    replace!(x->x > MAX_H ? MAX_H : x, h_init)
-
-    locmask = anylocal(localization)
-    h_init[CI[.!locmask],:] .= NaN
-    b_init[CI[.!locmask],:] .= NaN
-
     xy_state = KeyedArray(fill(NaN, 2, length(y_grid), length(x_grid), ens_size, ntimes+1),
-    field=[:h, :b], y=y_grid, x=x_grid, ens=1:ens_size, t=0:ntimes)
+        field=[:h, :b], y=y_grid, x=x_grid, ens=1:ens_size, t=0:ntimes)
 
-    xy_state(:h)(t=0) .= h_init
-    xy_state(:b)(t=0) .= b_init
+    if xy_file == "false"
+        gridshape = (length(y_grid), length(x_grid))  # useful later
+        
+        CI = CartesianIndices(gridshape)
+
+        xy_grid = densify(x_grid, y_grid)
+        trans = Proj.Transformation(modelproj, wgs84())
+        lola = trans.(parent(parent(xy_grid)))
+
+        distarr = lonlatgrid_dists(lola)
+        gc = gaspari1999_410(distarr, compactlengthscale(lengthscale))
+
+        # We wrap in Symmetric because we know it is. Without it, eigvals of β can be small
+        # (but positive) and still fail the `isposdef` check
+        hdistribution = Distributions.MvNormal(h0, Symmetric(LinearAlgebra.Diagonal(hB)*gc*LinearAlgebra.Diagonal(hB)))  # yes, w/ matrix argument we need variance
+        bdistribution = Distributions.MvNormal(b0, Symmetric(LinearAlgebra.Diagonal(bB)*gc*LinearAlgebra.Diagonal(bB)))
+
+        # Initial ensemble
+        h_init = reshape(rand(rng, hdistribution, ens_size), gridshape..., ens_size)
+        b_init = reshape(rand(rng, bdistribution, ens_size), gridshape..., ens_size)
+        
+        replace!(x->x < MIN_BETA ? MIN_BETA : x, b_init) #TODO Check structure here; GPT thinks this is not an appropriate way to do this
+        replace!(x->x > MAX_BETA ? MAX_BETA : x, b_init) # possible correction: b_init[b_init .< MIN_BETA] .= MIN_BETA
+        replace!(x->x < MIN_H ? MIN_H : x, h_init) 
+        replace!(x->x > MAX_H ? MAX_H : x, h_init)
+
+        locmask = anylocal(localization)
+        h_init[CI[.!locmask],:] .= NaN
+        b_init[CI[.!locmask],:] .= NaN
+
+        xy_state(:h)(t=0) .= h_init
+        xy_state(:b)(t=0) .= b_init
+    else
+        background_state = load(xy_file,"state")
+        if background_state.xy_state.ens != 1:ens_size
+            error("Ensemble size mismatch")
+        end
+        init_t = first_t_with_agreement(background_state.rx_phi_offset, 0.85)
+        xy_state(t=0) .= background_state.xy_state(t=init_t+3)
+        @info "Stacked state vector starting with $(init_t+3)th iteration from file"
+    end
 
     if :tx in statetypes
         @unpack σNLK, σNML, shuffle_tx, NLKb, NMLb = parameters()
@@ -80,79 +90,80 @@ function runletkf(parameters)
     # Run model
     ym = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, ntimes+1); 
         field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
-    
-    if precondition_rx
-        @unpack precon_ens_size, precon_itrs = parameters()
-        if precon_itrs > length(data.t)
-            error("More preconditioning iterations specified than data time steps available")
-        end
-        start_time = Dates.now()
-        @info "Preconditioning RX offsets: " start_time
-        ym_precondition = deepcopy(ym(t=0))
-        basic_forward_model = (z -> model(itp, z.xy_state, paths, dt; pathstep))
-        prior_state = (; xy_state = xy_state(t=0))
-        ensemble_model!(ym_precondition, basic_forward_model, prior_state)
+    if :rx in statetypes
+        if precondition_rx
+            @unpack precon_ens_size, precon_itrs = parameters()
+            if precon_itrs > length(data.t)
+                error("More preconditioning iterations specified than data time steps available")
+            end
+            start_time = Dates.now()
+            @info "Preconditioning RX offsets: " start_time
+            ym_precondition = deepcopy(ym(t=0))
+            basic_forward_model = (z -> model(itp, z.xy_state, paths, dt; pathstep))
+            prior_state = (; xy_state = xy_state(t=0))
+            ensemble_model!(ym_precondition, basic_forward_model, prior_state)
 
-        ϕ_statistics = KeyedArray(fill(NaN,4,npaths,ens_size,precon_itrs+1), ϕ_off=0:3, path = pathname.(paths), ens=1:ens_size, t=0:precon_itrs)
-        
-        @showprogress Threads.@threads for e in ym_precondition.ens
-            #outer set of ensembles, split to become new "forward models"
+            ϕ_statistics = KeyedArray(fill(NaN,4,npaths,ens_size,precon_itrs+1), ϕ_off=0:3, path = pathname.(paths), ens=1:ens_size, t=0:precon_itrs)
+            
+            @showprogress Threads.@threads for e in ym_precondition.ens
+                #outer set of ensembles, split to become new "forward models"
 
-            #ens_size here is the inner set of ensembles used on each of the outer set.
-            loc_rx_phi_offset = KeyedArray(fill(NaN,npaths,precon_ens_size,precon_itrs+1), path = pathname.(paths), ens=1:precon_ens_size, t=0:precon_itrs)
-            loc_rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, precon_ens_size)) 
-            #Pulls a new set of samples for each outer ensemble member, IE the inner ensembles should be different across outer ensemble members
-            loc_ym_precondition = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, precon_itrs+1); 
-                field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:precon_itrs)
+                #ens_size here is the inner set of ensembles used on each of the outer set.
+                loc_rx_phi_offset = KeyedArray(fill(NaN,npaths,precon_ens_size,precon_itrs+1), path = pathname.(paths), ens=1:precon_ens_size, t=0:precon_itrs)
+                loc_rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, precon_ens_size)) 
+                #Pulls a new set of samples for each outer ensemble member, IE the inner ensembles should be different across outer ensemble members
+                loc_ym_precondition = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, precon_itrs+1); 
+                    field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:precon_itrs)
 
-            for t in loc_ym_precondition.t
-                for ee in loc_ym_precondition.ens
-                    #Set each of the inner ensemble members to the current out ensemble member's ym. Each of these will be modified by the local RX offset, ie, G(b)
-                    loc_ym_precondition(t=t, ens=ee) .= ym_precondition(ens=e)
+                for t in loc_ym_precondition.t
+                    for ee in loc_ym_precondition.ens
+                        #Set each of the inner ensemble members to the current out ensemble member's ym. Each of these will be modified by the local RX offset, ie, G(b)
+                        loc_ym_precondition(t=t, ens=ee) .= ym_precondition(ens=e)
+                    end
                 end
+
+                for i in 1:maximum(loc_ym_precondition.t)
+                    
+                    ### G(b)
+                    for ee in loc_rx_phi_offset.ens
+                        loc_ym_precondition(field=:phase, ens=ee, t=i) .+= loc_rx_phi_offset(ens=ee,t=i-1) .* (π/2)
+                    end
+
+                    ybar = mean(loc_ym_precondition(t=i), dims=:ens)
+
+                    Y = similar(loc_ym_precondition(t=i))
+                    Y(:amp) .= loc_ym_precondition(t=i,field=:amp) .- ybar(:amp)
+                    Y(:phase) .= phasediff.(loc_ym_precondition(t=i,field=:phase), ybar(:phase))
+                    #Currently, MVIA.rx_phi_offset() assumes amplitude and phase data. 
+
+                    #Y = MVIA.phasediff.(loc_ym_precondition(:phase), ybar(:phase)) #Exclude amplitude in constructing Y matrix
+                    xnew_phi = MVIA.rx_phi_update(loc_rx_phi_offset(t=i-1), data(t=i), ybar, Y, R; ρ=ρ)
+                    loc_rx_phi_offset(t=i) .= mod.(round.(xnew_phi), 4)
+                    for p in ϕ_statistics.path
+
+                        vals = parent(loc_rx_phi_offset(t=i, path=p))
+                        N = length(vals)
+
+                        ratios = [count(==(off), vals) / N for off in ϕ_statistics.ϕ_off]
+
+                        ϕ_statistics(path=p, ens=e, t=i) .= ratios
+                    end
+                end
+
+            end
+            final_ϕ_statistics = dropdims(mean(ϕ_statistics(t=maximum(ϕ_statistics.t)), dims=:ens),dims=:ens)
+            jldsave(joinpath(resdir(scenario), "$(scenario)_preconOffsets.jld2"); ϕ_statistics, final_ϕ_statistics, ym_precondition)
+
+            for p in final_ϕ_statistics.path
+                probs = Array(parent(parent(final_ϕ_statistics(path=p))))           
+                dist  = Categorical(probs)
+
+                rx_phi_offset(path=p, t=0) .= rand(dist, ens_size) .- 1
             end
 
-            for i in 1:maximum(loc_ym_precondition.t)
-                
-                ### G(b)
-                for ee in loc_rx_phi_offset.ens
-                    loc_ym_precondition(field=:phase, ens=ee, t=i) .+= loc_rx_phi_offset(ens=ee,t=i-1) .* (π/2)
-                end
-
-                ybar = mean(loc_ym_precondition(t=i), dims=:ens)
-
-                Y = similar(loc_ym_precondition(t=i))
-                Y(:amp) .= loc_ym_precondition(t=i,field=:amp) .- ybar(:amp)
-                Y(:phase) .= phasediff.(loc_ym_precondition(t=i,field=:phase), ybar(:phase))
-                #Currently, MVIA.rx_phi_offset() assumes amplitude and phase data. 
-
-                #Y = MVIA.phasediff.(loc_ym_precondition(:phase), ybar(:phase)) #Exclude amplitude in constructing Y matrix
-                xnew_phi = MVIA.rx_phi_update(loc_rx_phi_offset(t=i-1), data(t=i), ybar, Y, R; ρ=ρ)
-                loc_rx_phi_offset(t=i) .= mod.(round.(xnew_phi), 4)
-                for p in ϕ_statistics.path
-
-                    vals = parent(loc_rx_phi_offset(t=i, path=p))
-                    N = length(vals)
-
-                    ratios = [count(==(off), vals) / N for off in ϕ_statistics.ϕ_off]
-
-                    ϕ_statistics(path=p, ens=e, t=i) .= ratios
-                end
-            end
-
-        end
-        final_ϕ_statistics = dropdims(mean(ϕ_statistics(t=maximum(ϕ_statistics.t)), dims=:ens),dims=:ens)
-        jldsave(joinpath(resdir(scenario), "$(scenario)_preconOffsets.jld2"); ϕ_statistics, final_ϕ_statistics, ym_precondition)
-
-        for p in final_ϕ_statistics.path
-            probs = Array(parent(parent(final_ϕ_statistics(path=p))))           
-            dist  = Categorical(probs)
-
-            rx_phi_offset(path=p, t=0) .= rand(dist, ens_size) .- 1
-        end
-
-        @info "Elapsed" Δt=canonicalize(Dates.now() - start_time)
-    end 
+            @info "Elapsed" Δt=canonicalize(Dates.now() - start_time)
+        end 
+    end
 
     if :tx in statetypes && :xy in statetypes && !(:rx in statetypes)
         state = (; xy_state, tx_pwrs)
@@ -709,6 +720,7 @@ function rundualletkf(parameters)
         jldsave(joinpath(resdir(scenario), "$scenario.jld2"); state, data, ym)
     end
 
+    #=
     # Compute ym with final estimate
     xy_state = state.xy_state(t=ntimes)
     if :tx in statetypes
@@ -728,7 +740,8 @@ function rundualletkf(parameters)
     end
 
     H!(xfinal, ntimes)
-
+    =#
+    
     jldsave(joinpath(resdir(scenario), "$scenario.jld2"); state, data, ym)
 
     return state, data, ym

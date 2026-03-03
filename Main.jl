@@ -22,17 +22,22 @@ const SI = ScatteredInterpolation
 
 include("common.jl")
 include("letkf.jl")
+new_folder = get(ENV, "NEW_FOLDER", "false")
 
 ### Set Global Parameters
 # Path at which to write output.
-const RESDIR = Ref(abspath(joinpath(@__DIR__, "results")))
+if new_folder == "false"
+    const RESDIR = Ref(abspath(joinpath(@__DIR__, "results")))
+else
+    const RESDIR = Ref(abspath(joinpath(@__DIR__, new_folder*"/results")))
+end
 resdir() = RESDIR[]
 resdir(d) = joinpath(resdir(), d)
 resdir!(d) = isdir(d) ? RESDIR[] = d : throw(ArgumentError("$(abspath(d)) must be a directory"))
 resdir!() = RESDIR[] = normpath(joinpath(@__DIR__))
 
 # Constrain values to physically realistic (but wide) bounds
-const MIN_BETA = 0.22
+const MIN_BETA = 0.18 # Gasdia used 0.22 when running with LWPC
 const MAX_BETA = 0.55
 const MIN_H = 55
 const MAX_H = 90
@@ -87,7 +92,7 @@ end
 
 params = init_params()
 parameters() = params
-
+do_dual = false
 ### Set TX parameters
 do_tx = parse(Bool, get(ENV, "DO_TX", "false"))
 precondition_tx = parse(Bool, get(ENV, "PRECONDITION_TX", "false"))
@@ -217,7 +222,11 @@ if xy_file != "false"
     @info "Background Ionosphere from file"
 end
 
-params = merge(params, (; data, σamp, σphase, dt, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy, xy_file))
+if new_folder != "false"
+    scenario = "h"*get(ENV, "H_OFF", "0")*"b"* get(ENV, "B_OFF", "0")*scenario
+end
+
+params = merge(params, (; data, σamp, σphase, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy, xy_file))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 

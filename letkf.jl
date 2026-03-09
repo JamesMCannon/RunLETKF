@@ -1,14 +1,13 @@
 function runletkf(parameters)
     @unpack scenario, ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
         datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, ρ,
-        localization, statetypes, xy_file = parameters()
+        localization, statetypes, xy_file, paths = parameters()
     @unpack modelproj = common_simulation()
 
     shuffle_xy = get(parameters(),:shuffle_xy, false)
 
     lengthscale = only(modelsteps).lengthscale
 
-    paths = buildtruepaths()
     npaths = length(paths)
     
     xy_state = KeyedArray(fill(NaN, 2, length(y_grid), length(x_grid), ens_size, ntimes+1),
@@ -351,14 +350,13 @@ end
 function rundualletkf(parameters)
     @unpack scenario, ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
         datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, ρ,
-        localization, statetypes, xy_file = parameters()
+        localization, statetypes, xy_file, paths = parameters()
     @unpack modelproj = common_simulation()
 
     shuffle_xy = get(parameters(),:shuffle_xy, false)
 
     lengthscale = only(modelsteps).lengthscale
 
-    paths = buildtruepaths()
     npaths = length(paths)
     pathnames = pathname.(paths)
 
@@ -609,7 +607,7 @@ function rundualletkf(parameters)
             @showprogress Threads.@threads for e in ym_precondition.ens
                 #outer set of ensembles, split to become new "forward models"
                 inner_rx_filter!(ym_precondition(ens=e), initial_ϕ_statistics, ϕ_statistics(ens=e), data(t=data_start_idx:data_start_idx+precon_itrs), 
-                    precon_ens_size, precon_itrs, R, ρ)
+                    precon_ens_size, precon_itrs, R, ρ, paths=paths)
             end
 
             for tt in 1:precon_itrs
@@ -750,11 +748,10 @@ end
 
 
 function inner_rx_filter!(ym_precondition, initial_ϕ_statistics, ϕ_statistics, data, 
-    precon_ens_size, precon_itrs, R, ρ) 
+    precon_ens_size, precon_itrs, R, ρ; paths=buildpaths()) 
     #TODO Refactor ϕ_statistics such that initial_ϕ_statistics is not needed as a separate variable
     #TODO Rename variables away from "precondition" since this is now part of dual filter rather than preconditioning step
     
-    paths = buildpaths()
     npaths = length(paths)
 
     # Allocate local RX offsets (inner ensembles)

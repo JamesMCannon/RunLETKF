@@ -72,7 +72,11 @@ shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
 
 rng = reset_rng()
 
-data = observations("Inputs/day1", σamp, σphase)
+params = init_params()
+parameters() = params
+@unpack paths, datafile, timeofday, pathset = parameters()
+
+data = observations(datafile, σamp, σphase, paths=paths)
 
 if !(:amp in datatypes && :phase in datatypes)
     if :phase in datatypes
@@ -90,8 +94,6 @@ if do_xy
     statetypes = (statetypes..., :xy)
 end
 
-params = init_params()
-parameters() = params
 do_dual = false
 ### Set TX parameters
 do_tx = parse(Bool, get(ENV, "DO_TX", "false"))
@@ -225,6 +227,10 @@ end
 if new_folder != "false"
     scenario = "h"*get(ENV, "H_OFF", "0")*"b"* get(ENV, "B_OFF", "0")*scenario
 end
+
+scenario = scenario * timeofday*"1"*pathset
+
+@info "Scenario: "*scenario
 
 params = merge(params, (; data, σamp, σphase, rng, scenario, datatypes, ens_size, ntimes, ρ, statetypes, shuffle_xy, xy_file))
 

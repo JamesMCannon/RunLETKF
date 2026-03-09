@@ -49,6 +49,64 @@ function buildtruepaths()
     return paths
 end
 
+
+"""
+    buildAVIDpaths()
+
+Return a vector of `(Transmitter, Receiver)` propagation paths from the Array for VLF Imaging of the D-region (AVID).
+"""
+function buildAVIDpaths()
+    transmitters = [
+        Transmitter{VerticalDipole}(TRANSMITTER[:NLK].name, TRANSMITTER[:NLK].latitude, TRANSMITTER[:NLK].longitude, TRANSMITTER[:NLK].antenna, TRANSMITTER[:NLK].frequency,240e3),    
+        Transmitter{VerticalDipole}(TRANSMITTER[:NML].name, TRANSMITTER[:NML].latitude, TRANSMITTER[:NML].longitude, TRANSMITTER[:NML].antenna, TRANSMITTER[:NML].frequency, 235e3)
+    ]
+    receivers = [
+        Receiver("WHI", 60.751, -135.101, 0.0, VerticalDipole()),
+        Receiver("CH", 58.763, -94.080, 0.0, VerticalDipole()),
+        Receiver("RAB", 58.222, -103.680, 0.0, VerticalDipole()),
+        Receiver("FSM", 60.026, -111.931, 0.0, VerticalDipole()),
+        Receiver("CAL", 51.654, -128.133, 0.0, VerticalDipole()),
+        Receiver("FSI", 61.757, -121.229, 0.0, VerticalDipole()),
+        Receiver("JU", 58.590, -134.904, 0.0, VerticalDipole()),
+        Receiver("PRU", 54.310, -130.326, 0.0, VerticalDipole()),
+        Receiver("PIN", 50.258, -95.865, 0.0, VerticalDipole()),
+        Receiver("ISL", 53.855, -94.660, 0.0, VerticalDipole()),
+        Receiver("GIL", 56.377, -94.644, 0.0, VerticalDipole())
+    ]
+    paths = [(tx, rx) for tx in transmitters for rx in receivers]
+
+    return paths
+end
+
+"""
+    buildAVIDpluspaths()
+
+Return a vector of `(Transmitter, Receiver)` propagation paths from AVID including an AARDVARK receiver near Edmonton.
+"""
+function buildAVIDpluspaths()
+    transmitters = [
+        Transmitter{VerticalDipole}(TRANSMITTER[:NLK].name, TRANSMITTER[:NLK].latitude, TRANSMITTER[:NLK].longitude, TRANSMITTER[:NLK].antenna, TRANSMITTER[:NLK].frequency,240e3),    
+        Transmitter{VerticalDipole}(TRANSMITTER[:NML].name, TRANSMITTER[:NML].latitude, TRANSMITTER[:NML].longitude, TRANSMITTER[:NML].antenna, TRANSMITTER[:NML].frequency, 235e3)
+    ]
+    receivers = [
+        Receiver("WHI", 60.751, -135.101, 0.0, VerticalDipole()),
+        Receiver("CH", 58.763, -94.080, 0.0, VerticalDipole()),
+        Receiver("RAB", 58.222, -103.680, 0.0, VerticalDipole()),
+        Receiver("FSM", 60.026, -111.931, 0.0, VerticalDipole()),
+        Receiver("CAL", 51.654, -128.133, 0.0, VerticalDipole()),
+        Receiver("FSI", 61.757, -121.229, 0.0, VerticalDipole()),
+        Receiver("JU", 58.590, -134.904, 0.0, VerticalDipole()),
+        Receiver("PRU", 54.310, -130.326, 0.0, VerticalDipole()),
+        Receiver("PIN", 50.258, -95.865, 0.0, VerticalDipole()),
+        Receiver("ISL", 53.855, -94.660, 0.0, VerticalDipole()),
+        Receiver("GIL", 56.377, -94.644, 0.0, VerticalDipole()),
+        Receiver("ED", 53.147, 113.343, 0.0, VerticalDipole())
+    ]
+    paths = [(tx, rx) for tx in transmitters for rx in receivers]
+
+    return paths
+end
+
 function txpower(paths, txname::AbstractString)
     for (tx, _) in paths
         tx.name == txname && return tx.power
@@ -68,8 +126,7 @@ observations(name,σamp, σphase)
 
 From filename "name" read in a JLD2 file of amp and phase measurments and randomly add noise from provided σamp, σphase.
 """
-function observations(name, σamp, σphase)
-    paths = buildpaths()
+function observations(name, σamp, σphase; paths=buildpaths())
 
     obs_fname = name*".jld2"
     f = jldopen(obs_fname, "r")
@@ -116,7 +173,35 @@ function init_params()
 
     @unpack west, east, south, north, modelproj = common_simulation()
 
-    dt = DateTime(2020, 3, 1, 20, 00) #using Dates
+
+    timeofday = get(ENV,"TOD","day")
+    pathset = get(ENV, "PATHS", "Standard")
+
+    if timeofday == "day" && pathset == "Standard"
+        dt = DateTime(2020, 3, 1, 20, 00) #using Dates
+    elseif timeofday == "day" && (pathset == "AVID" || pathset == "AVIDPLUS")
+        dt = DateTime(2025, 6, 1, 19, 00)
+    elseif timeofday == "morning" && (pathset == "AVID" || pathset == "AVIDPLUS")
+        dt = DateTime(2025, 6, 1, 13, 00)
+    elseif timeofday == "night" && (pathset == "AVID" || pathset == "AVIDPLUS")
+        dt = DateTime(2025, 6, 2, 7)
+    else
+        error("Unknown time and pathset combination: ", timeofday, " ", pathset)
+    end
+
+    if pathset == "Standard"
+        paths = buildpaths()
+        datafile = "Inputs/"*timeofday*"1"
+    elseif pathset == "AVID"
+        paths = buildAVIDpaths()
+        datafile = "Inputs/"*timeofday*"1_buildAVIDpaths"
+    elseif pathset == "AVIDPLUS"
+        paths = buildAVIDpluspaths()
+        datafile = "Inputs/"*timeofday*"1_buildAVIDpluspaths"
+    else
+        error("Unknown Pathset: ", pathset)
+    end
+
     pathstep = 50e3 # defined in WGS84
 
     # Setup Grid
@@ -129,7 +214,6 @@ function init_params()
     trans = Proj.Transformation(modelproj, MVIA.wgs84())
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
-    paths = buildtruepaths()
     localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
     filterbounds!(localization, lola, west, east, south, north)
 
@@ -143,13 +227,13 @@ function init_params()
 
     h_off = parse(Float64, get(ENV, "H_OFF", "0"))
     b_off = parse(Float64, get(ENV, "B_OFF", "0"))
-    hb0 = [MVIA.ferguson(ll[2], LMPTools.zenithangle(ll[2], ll[1], dt), dt) for ll in lola]
+    hb0 = [LMPTools.ferguson(ll[2], LMPTools.zenithangle(ll[2], ll[1], dt), dt) for ll in lola]
     h0 = getindex.(hb0, 1) .+ h_off
     b0 = getindex.(hb0, 2) .+ b_off
 
     @assert length(h0) == length(hB) == ncells
 
-    return(;pathstep, modelsteps, x_grid, y_grid, hB, bB, h0, b0, itp, localization, dt)
+    return(;pathstep, modelsteps, x_grid, y_grid, hB, bB, h0, b0, itp, localization, dt, paths, datafile, timeofday, pathset)
 end
 
 

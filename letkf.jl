@@ -1,7 +1,7 @@
 function runletkf(parameters)
     @unpack scenario, ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
-        datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, ρ,
-        localization, statetypes, xy_file, paths = parameters()
+        datatypes, h0, b0, hB, bB, rng, data, itp, ρ,
+        localization, statetypes, xy_file, paths, R = parameters()
     @unpack modelproj = common_simulation()
 
     shuffle_xy = get(parameters(),:shuffle_xy, false)
@@ -77,13 +77,6 @@ function runletkf(parameters)
     
     end
    
-    R = Float64[]
-    if :amp in datatypes
-        R = [R; fill(σamp^2, npaths)]
-    end
-    if :phase in datatypes
-        R = [R; fill(σphase^2, npaths)]
-    end
     #R = [fill(σamp^2, npaths); fill(σphase^2, npaths)] # Vector is transformed into a diagonal matrix in MVIA
 
     # Run model
@@ -320,7 +313,7 @@ function runletkf(parameters)
         @info "Elapsed" Δt=canonicalize(Dates.now() - start_time)
         jldsave(joinpath(resdir(scenario), "$scenario.jld2"); state, data, ym)
     end
-
+    #=
     # Compute ym with final estimate
     xy_state = state.xy_state(t=ntimes)
     if :tx in statetypes
@@ -342,15 +335,15 @@ function runletkf(parameters)
     H!(xfinal, ntimes)
 
     jldsave(joinpath(resdir(scenario), "$scenario.jld2"); state, data, ym)
-
+    =#
     return state, data, ym
 end
 
 
 function rundualletkf(parameters)
     @unpack scenario, ens_size, ntimes, dt, pathstep, x_grid, y_grid, modelsteps,
-        datatypes, h0, b0, hB, bB, rng, σamp, σphase, data, itp, ρ,
-        localization, statetypes, xy_file, paths = parameters()
+        datatypes, h0, b0, hB, bB, rng, data, itp, ρ,
+        localization, statetypes, xy_file, paths, R = parameters()
     @unpack modelproj = common_simulation()
 
     shuffle_xy = get(parameters(),:shuffle_xy, false)
@@ -358,7 +351,7 @@ function rundualletkf(parameters)
     lengthscale = only(modelsteps).lengthscale
 
     npaths = length(paths)
-    pathnames = pathname.(paths)
+    pathnames = MVIA.pathname.(paths)
 
     xy_state = KeyedArray(fill(NaN, 2, length(y_grid), length(x_grid), ens_size, ntimes+1),
         field=[:h, :b], y=y_grid, x=x_grid, ens=1:ens_size, t=0:ntimes)
@@ -368,7 +361,7 @@ function rundualletkf(parameters)
         
         CI = CartesianIndices(gridshape)
 
-        xy_grid = densify(x_grid, y_grid)
+        xy_grid = MVIA.densify(x_grid, y_grid)
         trans = Proj.Transformation(modelproj, wgs84())
         lola = trans.(parent(parent(xy_grid)))
 
@@ -440,26 +433,20 @@ function rundualletkf(parameters)
 
     if :rx in statetypes
         @unpack precondition_rx, shuffle_rx = parameters()
-        rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
+        rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = MVIA.pathname.(paths), ens=1:ens_size, t=0:ntimes)
         rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size)) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
-        if precondition_rx #Assumed true if :rx in statetypes for dual LETKF. If statement kept in for future flexibility.
-            @unpack precon_ens_size, precon_itrs = parameters()
-            μ_ϕ_statistics = KeyedArray(fill(NaN,4,npaths,precon_itrs*ntimes+1), ϕ_off=0:3, path = pathname.(paths), t=0:precon_itrs*ntimes)
-        end
+        
+        @unpack precon_ens_size, precon_itrs = parameters()
+        μ_ϕ_statistics = KeyedArray(fill(NaN,4,npaths,precon_itrs*ntimes+1), ϕ_off=0:3, path = MVIA.pathname.(paths), t=0:precon_itrs*ntimes)
+    
         state = merge(state, (; rx_phi_offset))
     end
    
-    R = Float64[]
-    if :amp in datatypes
-        R = [R; fill(σamp^2, npaths)]
-    end
-    if :phase in datatypes
-        R = [R; fill(σphase^2, npaths)]
-    end
+
 
     # Define model
     ym = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, ntimes+1); 
-        field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
+        field=[:amp, :phase], path=MVIA.pathname.(paths), ens=1:ens_size, t=0:ntimes)
 
     forward_model =
         (:tx in statetypes && :xy in statetypes) ?
@@ -582,9 +569,9 @@ function rundualletkf(parameters)
     
             ym_precondition = deepcopy(ym(t=i-1))            
 
-            ϕ_statistics = KeyedArray(fill(NaN,4,npaths,ens_size,precon_itrs+1), ϕ_off=0:3, path = pathname.(paths), ens=1:ens_size, t=0:precon_itrs)
+            ϕ_statistics = KeyedArray(fill(NaN,4,npaths,ens_size,precon_itrs+1), ϕ_off=0:3, path = MVIA.pathname.(paths), ens=1:ens_size, t=0:precon_itrs)
 
-            initial_ϕ_statistics = KeyedArray(fill(NaN,4,npaths), ϕ_off=0:3, path = pathname.(paths))
+            initial_ϕ_statistics = KeyedArray(fill(NaN,4,npaths), ϕ_off=0:3, path = MVIA.pathname.(paths))
 
             for p in xold.rx_phi_offset.path
                     vals = parent(xold.rx_phi_offset(path=p))
@@ -756,7 +743,7 @@ function inner_rx_filter!(ym_precondition, initial_ϕ_statistics, ϕ_statistics,
 
     # Allocate local RX offsets (inner ensembles)
     loc_rx_phi_offset = KeyedArray(fill(NaN, npaths, precon_ens_size, precon_itrs + 1),
-        path = pathname.(paths),
+        path = MVIA.pathname.(paths),
         ens  = 1:precon_ens_size,
         t    = 0:precon_itrs
     )
@@ -772,7 +759,7 @@ function inner_rx_filter!(ym_precondition, initial_ϕ_statistics, ϕ_statistics,
     loc_ym_precondition = KeyedArray(
         Array{Float64,4}(undef, 2, npaths, precon_ens_size, precon_itrs + 1),
         field = [:amp, :phase],
-        path  = pathname.(paths),
+        path  = MVIA.pathname.(paths),
         ens   = 1:precon_ens_size,
         t     = 0:precon_itrs
     )
@@ -832,7 +819,7 @@ function inner_tx_filter!(ym_precondition, dual_tx_pwrs, data,
     loc_ym_precondition = KeyedArray(
         Array{Float64,4}(undef, 2, npaths, precon_ens_size, precon_itrs + 1),
         field = [:amp, :phase],
-        path  = pathname.(paths),
+        path  = MVIA.pathname.(paths),
         ens   = 1:precon_ens_size,
         t     = 0:precon_itrs
     )
@@ -846,7 +833,7 @@ function inner_tx_filter!(ym_precondition, dual_tx_pwrs, data,
 
     loc_tx_pwrs = KeyedArray(fill(NaN,2, precon_ens_size, precon_itrs+1), pwrs = [:NML, :NLK], ens=1:precon_ens_size, t=0:precon_itrs)
     #needed because tx_pwrs_update requires structure with dimesion ens, not dual_ens. Currently keeping both so dual_tx_pwrs can be mutated for all ensembles.
-    pathnames = pathname.(paths)
+    pathnames = MVIA.pathname.(paths)
 
     # Dual filter iterations
     for dual_i in 1:maximum(loc_ym_precondition.t)

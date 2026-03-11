@@ -114,7 +114,7 @@ function txpower(paths, txname::AbstractString)
     error("No transmitter found with name = $txname")
 end
 
-
+#TODO: Why is rng not defaulted to reset_rng()?
 function sample_values(A::KeyedArray, n::Int; rng=Random.default_rng())
     data = parent(A)              # raw Array
     idx = sample(rng, eachindex(data), n, replace=false)
@@ -126,17 +126,15 @@ observations(name,σamp, σphase)
 
 From filename "name" read in a JLD2 file of amp and phase measurments and randomly add noise from provided σamp, σphase.
 """
-function observations(name, σamp, σphase; paths=buildpaths())
+function observations(name, σamp, σphase; paths=buildpaths(), rng=reset_rng())
 
     obs_fname = name*".jld2"
     f = jldopen(obs_fname, "r")
     obsamp, obsphase = f["obsamp"], f["obsphase"]
 
-    rng = StableRNG(1234)
-
     npaths = length(paths)
     data = KeyedArray(Array{Float64,3}(undef, 4, npaths, DATALENGTH);
-        field=[:amp, :phase, :amp_noiseless, :phase_noiseless], path=pathname.(paths), t=1:DATALENGTH)
+        field=[:amp, :phase, :amp_noiseless, :phase_noiseless], path=MVIA.pathname.(paths), t=1:DATALENGTH)
     data(:amp_noiseless) .= obsamp
     data(:phase_noiseless) .= obsphase
     data(:amp) .= obsamp .+ σamp.*randn(rng, npaths, DATALENGTH)
@@ -160,20 +158,32 @@ function observations(name)
 end
 
 
-"""
-    pathname(p)
-
-Return path name string for (transmitter, receiver) path tuple `p`.
-
-    TODO: Exported by SIA, delete when SIA is properly imported
-"""
-pathname(p) = p[1].name*"-"*p[2].name
 
 function init_params()
+    ### Read parameters from environment variables, with defaults if not set.
+    new_folder = get(ENV, "NEW_FOLDER", "false")
 
-    @unpack west, east, south, north, modelproj = common_simulation()
+    ens_size = parse(Int, get(ENV, "ENS_SIZE", "2"))
+    ntimes = parse(Int, get(ENV, "ITRS", "1"))
+    shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
+    ρ = parse(Float64, get(ENV, "RHO","1.1"))
+    xy_file = get(ENV, "XY_FILE","false")
+    rng = reset_rng()
 
+    statetypes = ()
+    if parse(Bool, get(ENV, "DO_XY", "true")) # Currently, only "true" is supported
+        statetypes = (statetypes..., :xy)
+    end
 
+    datatypes = ()
+    if parse(Bool, get(ENV, "DO_AMP", "true")) 
+        datatypes = (datatypes..., :amp)
+    end
+    if parse(Bool, get(ENV, "DO_PHASE", "true"))
+        datatypes = (datatypes..., :phase)
+    end
+
+    ### Determine which data file to use based on time of day and exact array configuration.
     timeofday = get(ENV,"TOD","day")
     pathset = get(ENV, "PATHS", "Standard")
 
@@ -202,7 +212,35 @@ function init_params()
         error("Unknown Pathset: ", pathset)
     end
 
+    ### Construct observations data structure, and related parameters.
+    σamp, σphase = 0.1, deg2rad(1.0)
+
+    data = observations(datafile, σamp, σphase, paths=paths)
+ 
+    if !(:amp in datatypes && :phase in datatypes)
+        if :phase in datatypes
+            data = data[Key([:phase, :phase_noiseless]), :, :]
+        elseif :amp in datatypes
+            data = data[Key([:amp, :amp_noiseless]), :, :]
+        else
+            error("Whoops! Datatypes don't make sense")
+        end
+    end
+
+    npaths = length(paths)
+
+    R = Float64[]
+    if :amp in datatypes
+        R = [R; fill(σamp^2, npaths)]
+    end
+    if :phase in datatypes
+        R = [R; fill(σphase^2, npaths)]
+    end
+
+    ### Create geospatial grid and related parameters
     pathstep = 50e3 # defined in WGS84
+
+    @unpack west, east, south, north, modelproj = common_simulation()
 
     # Setup Grid
     dr = 300e3
@@ -221,21 +259,131 @@ function init_params()
     itppts = MVIA.build_xygrid(MVIA.anylocal(localization), x_grid, y_grid)
     itp = MVIA.ScatteredInterpolant(SI.GeneralizedPolyharmonic(1,1), modelproj, itppts) #MVIA extends SI.ScatteredInterpolant
 
+    ### Build the initial background ensemble parameters. NOTE: for best results, ensure LMPTools.ferguson() has been updated to add 0.15 to Beta. 
     ncells = length(lola)
     hB = fill(2,ncells) # σ_h′
     bB = fill(0.04, ncells) # σ_β
 
     h_off = parse(Float64, get(ENV, "H_OFF", "0"))
     b_off = parse(Float64, get(ENV, "B_OFF", "0"))
+    #These two commands allow brute force testing of initial background ensemble means. Generally should be left at
+
     hb0 = [LMPTools.ferguson(ll[2], LMPTools.zenithangle(ll[2], ll[1], dt), dt) for ll in lola]
     h0 = getindex.(hb0, 1) .+ h_off
     b0 = getindex.(hb0, 2) .+ b_off
 
     @assert length(h0) == length(hB) == ncells
 
-    return(;pathstep, modelsteps, x_grid, y_grid, hB, bB, h0, b0, itp, localization, dt, paths, datafile, timeofday, pathset)
+    return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
+    dt, paths, datafile, data, R, pathstep, modelsteps, x_grid, y_grid, localization, itp, hB, bB, h0, b0)
 end
 
+
+function init_dual_params(p)
+    precon_ens_size = parse(Int, get(ENV, "PRECON_ENS_SIZE", "-1")) # Default value means use ens_size
+    if precon_ens_size == -1
+        precon_ens_size = p.ens_size
+    end
+    precon_itrs = parse(Int, get(ENV, "PRECON_ITRS", "1"))
+    return merge(p, (; precon_ens_size, precon_itrs))
+end
+
+function init_rx_params(p)
+    statetypes = (p.statetypes..., :rx)
+    precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
+    shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
+    return merge(p, (; statetypes, precondition_rx, shuffle_rx))
+end
+
+function init_tx_params(p)
+    statetypes = (p.statetypes..., :tx)
+    precondition_tx = parse(Bool, get(ENV, "PRECONDITION_TX", "false"))
+    shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
+
+    NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
+    NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
+
+    σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
+    σNLK, σNML = σTX, σTX
+
+    TX_range = parse(Float64, get(ENV, "TX_RANGE_KW", "500")) * 1000 #convert to watts
+
+    shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
+
+    σTXkw = Int(σTX/1000)
+    return merge(p, (; statetypes, precondition_tx, shuffle_tx, σNLK, σNML, σTXkw, NLKb, NMLb, TX_range))
+end
+
+
+function name_scenario!(scenario, parameters)
+    @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, timeofday, pathset = parameters()
+    scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)"
+
+    shuffle_check = false
+    if :tx in statetypes
+        @unpack shuffle_tx, TX_range = parameters()
+        if shuffle_tx
+            shuffle_check=true
+        end
+
+        if TX_range != 500*1000.0
+            scenario = scenario * "_tx_constrained_$(TX_range/1000)kW"
+        else
+            scenario = scenario * "_tx"
+        end
+
+        scenario = scenario * "_log10"
+    end
+    if :rx in statetypes
+        @unpack shuffle_rx = parameters()
+        if shuffle_rx
+            shuffle_check=true
+        end
+        scenario = scenario * "_rx"
+    end
+    if :xy in statetypes
+        @unpack shuffle_xy = parameters()
+        if shuffle_xy
+            shuffle_check=true
+        end
+    end
+    if shuffle_check
+        scenario = scenario * "_shuffle"
+    end
+
+    if !(:amp in datatypes && :phase in datatypes)
+        if :amp in datatypes
+            scenario = scenario* "_amp_only"
+        elseif :phase in datatypes
+            scenario = scenario * "_phase_only"
+        end 
+    end
+
+    precondition_rx = get(parameters(), :precondition_rx, false)
+    precondition_tx = get(parameters(), :precondition_tx, false)
+
+    if precondition_rx || precondition_tx
+        @unpack precon_itrs, precon_ens_size, do_dual = parameters()
+        if do_dual
+            scenario = scenario*"_dual_$(precon_itrs)dualitrs_$(precon_ens_size)dualens"
+        else
+            scenario = scenario * "_preconditioned_v2"
+        end
+    end
+
+    if xy_file != "false"
+        scenario = scenario * "_xy_file"
+        @info "Background Ionosphere from file"
+    end
+
+    if new_folder != "false"
+        scenario = "h"*get(ENV, "H_OFF", "0")*"b"* get(ENV, "B_OFF", "0")*scenario
+    end
+
+    scenario = scenario * timeofday*"1"*pathset
+
+    @info "Scenario: "*scenario
+end
 
 """
     common_simulation()

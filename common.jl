@@ -157,8 +157,6 @@ function observations(name)
     return data
 end
 
-
-
 function init_params()
     ### Read parameters from environment variables, with defaults if not set.
     new_folder = get(ENV, "NEW_FOLDER", "false")
@@ -215,18 +213,6 @@ function init_params()
     ### Construct observations data structure, and related parameters.
     σamp, σphase = 0.1, deg2rad(1.0)
 
-    data = observations(datafile, σamp, σphase, paths=paths)
- 
-    if !(:amp in datatypes && :phase in datatypes)
-        if :phase in datatypes
-            data = data[Key([:phase, :phase_noiseless]), :, :]
-        elseif :amp in datatypes
-            data = data[Key([:amp, :amp_noiseless]), :, :]
-        else
-            error("Whoops! Datatypes don't make sense")
-        end
-    end
-
     npaths = length(paths)
 
     R = Float64[]
@@ -275,24 +261,33 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
-    dt, paths, datafile, data, R, pathstep, modelsteps, x_grid, y_grid, localization, itp, hB, bB, h0, b0)
+    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, itp, hB, bB, h0, b0)
 end
 
 
 function init_dual_params(p)
-    precon_ens_size = parse(Int, get(ENV, "PRECON_ENS_SIZE", "-1")) # Default value means use ens_size
-    if precon_ens_size == -1
-        precon_ens_size = p.ens_size
+    split_ens_size = parse(Int, get(ENV, "SPLIT_ENS_SIZE", "-1")) # Default value means use ens_size
+    if split_ens_size == -1
+        split_ens_size = p.ens_size
     end
-    precon_itrs = parse(Int, get(ENV, "PRECON_ITRS", "1"))
-    return merge(p, (; precon_ens_size, precon_itrs))
+    split_itrs = parse(Int, get(ENV, "SPLIT_ITRS", "1"))
+    filtertype = Symbol(get(ENV, "FILTERTYPE", "stacked")) #Options are stacked, dual, or split for use with MVIA
+    return merge(p, (; split_ens_size, split_itrs, filtertype))
 end
 
 function init_rx_params(p)
     statetypes = (p.statetypes..., :rx)
     precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
     shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
-    return merge(p, (; statetypes, precondition_rx, shuffle_rx))
+    rx_scenario = parse(Int, get(ENV, "RX_SCENARIO", "0"))
+    if rx_scenario == 0
+        rx_offsets = rx_offsets0(p.paths)
+    elseif rx_scenario == 1
+        rx_offsets = rx_offsets1(p.paths)
+    else
+        error("Unknown RX_SCENARIO: ", rx_scenario)
+    end
+    return merge(p, (; statetypes, precondition_rx, shuffle_rx, rx_offsets))
 end
 
 function init_tx_params(p)
@@ -383,6 +378,18 @@ function name_scenario!(scenario, parameters)
     scenario = scenario * timeofday*"1"*pathset
 
     @info "Scenario: "*scenario
+end
+
+function rx_offsets0(paths)
+    return [0.0 for _ in paths]
+end
+
+function rx_offsets1(paths)
+    offsets = Float64[]
+    for l in 0:length(paths)-1
+        push!(offsets, mod(l, 4))
+    end
+    offsets
 end
 
 """

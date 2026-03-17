@@ -44,10 +44,29 @@ end
 if parse(Bool, get(ENV, "DO_TX", "false"))
     params = init_tx_params(params)
 end
-do_dual = parse(Bool, get(ENV, "DO_DUAL", "false"))
-if do_dual
+if parse(Bool, get(ENV, "DO_DUAL", "false"))
     params = init_dual_params(params)
 end
+
+data = observations(params.datafile, params.σamp, params.σphase, paths=params.paths)
+
+if !(:amp in params.datatypes && :phase in params.datatypes)
+    if :phase in params.datatypes
+        data = data[Key([:phase, :phase_noiseless]), :, :]
+    elseif :amp in params.datatypes
+        data = data[Key([:amp, :amp_noiseless]), :, :]
+    else
+        error("Whoops! Datatypes don't make sense")
+    end
+end
+
+if :rx in params.statetypes
+    data(:phase) .+= params.rx_offsets .* (π/2)
+    data(:phase_noiseless) .+= params.rx_offsets .* (π/2)
+end
+
+params = merge(params, (; data))
+
 parameters() = params
 
 # Path at which to write output.
@@ -92,13 +111,7 @@ params = merge(params, (; scenario))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 
-### Run LETKF here
-if do_dual
-    @info "Running Dual LETKF"
-    state, data, ym = rundualletkf(parameters)
-else
-    @info "Running LETKF"
-    state, data, ym = runletkf(parameters)
-end
+state, data, ym = runletkf(parameters)
+
 
 

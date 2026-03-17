@@ -100,7 +100,7 @@ function buildAVIDpluspaths()
         Receiver("PIN", 50.258, -95.865, 0.0, VerticalDipole()),
         Receiver("ISL", 53.855, -94.660, 0.0, VerticalDipole()),
         Receiver("GIL", 56.377, -94.644, 0.0, VerticalDipole()),
-        Receiver("ED", 53.147, 113.343, 0.0, VerticalDipole())
+        Receiver("ED", 53.147, -113.343, 0.0, VerticalDipole())
     ]
     paths = [(tx, rx) for tx in transmitters for rx in receivers]
 

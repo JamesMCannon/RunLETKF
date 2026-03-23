@@ -105,13 +105,10 @@ else
     scenario = "tx_rx_"
 end
 
-name_scenario!(scenario, parameters)
+scenario = name_scenario(scenario, parameters)
 
 params = merge(params, (; scenario))
 
 isdir(resdir(scenario)) || mkdir(resdir(scenario))
 
 state, data, ym = runletkf(parameters)
-
-
-

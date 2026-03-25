@@ -89,13 +89,11 @@ function runletkf(parameters)
         @unpack precondition_rx, shuffle_rx, rx_offsets = parameters()
         if filtertype != :split
             rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
-            rx_phi_offset(t=0) .= round.(rand(rng, Distributions.Uniform(0,3), npaths, ens_size)) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
+            rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
         else
             rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size, split_ens_size, ntimes+1), path = pathname.(paths), ens=1:ens_size, split_ens=1:split_ens_size, t=0:ntimes)
-            for e in rx_phi_offset.ens
-                #TODO could this be rewritten without the for loop?
-                rx_phi_offset(ens=e, t=0) .= round.(rand(rng, Distributions.Uniform(0,3), npaths, split_ens_size))
-            end
+            rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size, split_ens_size)
+         
         end 
         jldsave(joinpath(resdir(scenario), "rx_offsets_$scenario.jld2"); rx_offsets)
 

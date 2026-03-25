@@ -186,8 +186,13 @@ function runletkf(parameters)
             xold = merge(xold, (; rx_phi_offset))
         end
 
-        xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
+        if :rx in statetypes || :tx in statetypes
+            xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
             localization=localization, datatypes=datatypes, filtertype=filtertype)
+        else
+            xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
+            localization=localization, datatypes=datatypes)
+        end
         #TODO figure out how to apply additional split_itrs if filtertype is split without rerunning the forward model.
 
         # Constrain beta and h' to physically realistic values

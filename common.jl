@@ -287,7 +287,7 @@ function init_rx_params(p)
     else
         error("Unknown RX_SCENARIO: ", rx_scenario)
     end
-    return merge(p, (; statetypes, precondition_rx, shuffle_rx, rx_offsets))
+    return merge(p, (; statetypes, precondition_rx, shuffle_rx, rx_offsets, rx_scenario))
 end
 
 function init_tx_params(p)
@@ -310,7 +310,7 @@ function init_tx_params(p)
 end
 
 
-function name_scenario!(scenario, parameters)
+function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, timeofday, pathset = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)"
 
@@ -330,11 +330,11 @@ function name_scenario!(scenario, parameters)
         scenario = scenario * "_log10"
     end
     if :rx in statetypes
-        @unpack shuffle_rx = parameters()
+        @unpack shuffle_rx, rx_scenario = parameters()
         if shuffle_rx
             shuffle_check=true
         end
-        scenario = scenario * "_rx"
+        scenario = scenario * "_rx_scen_$rx_scenario"
     end
     if :xy in statetypes
         @unpack shuffle_xy = parameters()
@@ -354,15 +354,18 @@ function name_scenario!(scenario, parameters)
         end 
     end
 
-    precondition_rx = get(parameters(), :precondition_rx, false)
+    precondition_rx = get(parameters(), :precondition_rx, false)#TODO should maybe just be do_rx/do_tx
     precondition_tx = get(parameters(), :precondition_tx, false)
 
     if precondition_rx || precondition_tx
-        @unpack precon_itrs, precon_ens_size, do_dual = parameters()
-        if do_dual
-            scenario = scenario*"_dual_$(precon_itrs)dualitrs_$(precon_ens_size)dualens"
+        @unpack filtertype = parameters()
+        if filtertype == :split
+            @unpack split_itrs, split_ens_size = parameters()
+            scenario = scenario*"_split_$(split_itrs)splititrs_$(split_ens_size)splitens"
+        elseif filtertype == :dual
+            scenario = scenario*"_dual"
         else
-            scenario = scenario * "_preconditioned_v2"
+            scenario = scenario*"_stacked"
         end
     end
 
@@ -378,6 +381,7 @@ function name_scenario!(scenario, parameters)
     scenario = scenario * timeofday*"1"*pathset
 
     @info "Scenario: "*scenario
+    return scenario
 end
 
 function rx_offsets0(paths)

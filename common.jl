@@ -264,17 +264,6 @@ function init_params()
     dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, itp, hB, bB, h0, b0)
 end
 
-
-function init_dual_params(p)
-    split_ens_size = parse(Int, get(ENV, "SPLIT_ENS_SIZE", "-1")) # Default value means use ens_size
-    if split_ens_size == -1
-        split_ens_size = p.ens_size
-    end
-    split_itrs = parse(Int, get(ENV, "SPLIT_ITRS", "1"))
-    filtertype = Symbol(get(ENV, "FILTERTYPE", "stacked")) #Options are stacked, dual, or split for use with MVIA
-    return merge(p, (; split_ens_size, split_itrs, filtertype))
-end
-
 function init_rx_params(p)
     statetypes = (p.statetypes..., :rx)
     precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
@@ -309,6 +298,15 @@ function init_tx_params(p)
     return merge(p, (; statetypes, precondition_tx, shuffle_tx, σNLK, σNML, σTXkw, NLKb, NMLb, TX_range))
 end
 
+function init_dual_params(p)
+    split_ens_size = parse(Int, get(ENV, "SPLIT_ENS_SIZE", "-1")) # Default value means use ens_size
+    if split_ens_size == -1
+        split_ens_size = p.ens_size
+    end
+    split_itrs = parse(Int, get(ENV, "SPLIT_ITRS", "1"))
+    filtertype = Symbol(get(ENV, "FILTERTYPE", "stacked")) #Options are stacked, dual, or split for use with MVIA
+    return merge(p, (; split_ens_size, split_itrs, filtertype))
+end
 
 function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, timeofday, pathset = parameters()

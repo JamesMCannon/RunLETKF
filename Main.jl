@@ -29,7 +29,7 @@ include("letkf.jl")
 ### Set Global Parameters
 # Constrain values to physically realistic (but wide) bounds
 const MIN_BETA = 0.18 # Gasdia used 0.22 when running with LWPC
-const MAX_BETA = 0.55
+const MAX_BETA = 0.90
 const MIN_H = 55
 const MAX_H = 90
 
@@ -100,7 +100,7 @@ if !do_tx && !do_rx
 elseif do_tx && !do_rx
     scenario = "tx_pwrs_"
 elseif !do_tx && do_rx
-    scenario = "rx_offset_"   
+    scenario = "rx_offset_mode_vonmises_"   
 else
     scenario = "tx_rx_"
 end

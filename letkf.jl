@@ -92,8 +92,22 @@ function runletkf(parameters)
             rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
         else
             rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size, split_ens_size, ntimes+1), path = pathname.(paths), ens=1:ens_size, split_ens=1:split_ens_size, t=0:ntimes)
-            rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size, split_ens_size)
-         
+            #rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size, split_ens_size)
+            
+            
+            # Sample a circular guassian aka a Von Mises distribution at random giving ~10% to the furthest bin
+            κ_rx = log(sqrt(10) - 1)  # ~10% probability at opposite value
+            period = 4
+            offsets = 0:3
+            for e in 1:ens_size
+                for (pi, p) in enumerate(pathname.(paths))
+                    center = rand(rng, offsets)
+                    θ_center = 2π * center / period
+                    w = [exp(κ_rx * cos(2π * v / period - θ_center)) for v in offsets]
+                    rx_phi_offset(path=p, ens=e, t=0) .= sample(rng, collect(offsets), Weights(w), split_ens_size)
+                end
+            end
+            
         end 
         jldsave(joinpath(resdir(scenario), "rx_offsets_$scenario.jld2"); rx_offsets)
 
@@ -174,6 +188,41 @@ function runletkf(parameters)
                 rx_phi_offset = shuffled
             else
                 rx_phi_offset = state.rx_phi_offset(t=i-1)
+            end
+
+            # Guard: break mode ties in rx_phi_offset before update
+            n_ties_broken = 0
+            for p in rx_phi_offset.path
+                for e in rx_phi_offset.ens
+                    if filtertype == :split
+                        vals = strip(rx_phi_offset(path=p, ens=e))  # 1D over split_ens
+                    else
+                        vals = strip(rx_phi_offset(path=p))          # 1D over ens
+                    end
+
+                    counts = [count(==(b), vals) for b in 0:3]
+                    max_count = maximum(counts)
+                    tied_values = findall(==(max_count), counts) .- 1  # back to 0-indexed {0,1,2,3}
+
+                    if length(tied_values) > 1
+                        winner, loser = tied_values[randperm(rng, length(tied_values))[1:2]]
+                        loser_idx = findfirst(==(loser), vals)
+                        if !isnothing(loser_idx)
+                            if filtertype == :split
+                                rx_phi_offset(path=p, ens=e)[loser_idx] = winner
+                            else
+                                rx_phi_offset(path=p)[loser_idx] = winner
+                            end
+                            n_ties_broken += 1
+                        end
+                    end
+
+                    # For !split, the outer ens loop is redundant — break after first iteration
+                    filtertype != :split && break
+                end
+            end
+            if n_ties_broken > 0
+                @info "Broke mode ties in rx_phi_offset" n_ties_broken filtertype
             end
         end
 

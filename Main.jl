@@ -100,7 +100,7 @@ if !do_tx && !do_rx
 elseif do_tx && !do_rx
     scenario = "tx_pwrs_"
 elseif !do_tx && do_rx
-    scenario = "rx_offset_mode_vonmises_"   
+    scenario = "rx_R2projected_"   
 else
     scenario = "tx_rx_"
 end

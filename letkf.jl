@@ -92,11 +92,11 @@ function runletkf(parameters)
             rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
         else
             rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size, split_ens_size, ntimes+1), path = pathname.(paths), ens=1:ens_size, split_ens=1:split_ens_size, t=0:ntimes)
-            #rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size, split_ens_size)
-            
-            
+            rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size, split_ens_size)
+            #rx_phi_offset(t=0) .= round.(rand(Distributions.Uniform(0,3), npaths, ens_size, split_ens_size))
+            #=
             # Sample a circular guassian aka a Von Mises distribution at random giving ~10% to the furthest bin
-            κ_rx = log(sqrt(10) - 1)  # ~10% probability at opposite value
+            κ_rx = 0.25 #log(sqrt(10) - 1)  # ~10% probability at opposite value
             period = 4
             offsets = 0:3
             for e in 1:ens_size
@@ -107,7 +107,7 @@ function runletkf(parameters)
                     rx_phi_offset(path=p, ens=e, t=0) .= sample(rng, collect(offsets), Weights(w), split_ens_size)
                 end
             end
-            
+            =#
         end 
         jldsave(joinpath(resdir(scenario), "rx_offsets_$scenario.jld2"); rx_offsets)
 
@@ -190,6 +190,7 @@ function runletkf(parameters)
                 rx_phi_offset = state.rx_phi_offset(t=i-1)
             end
 
+            
             # Guard: break mode ties in rx_phi_offset before update
             n_ties_broken = 0
             for p in rx_phi_offset.path
@@ -224,6 +225,7 @@ function runletkf(parameters)
             if n_ties_broken > 0
                 @info "Broke mode ties in rx_phi_offset" n_ties_broken filtertype
             end
+        
         end
 
         xold = (; xy_state)

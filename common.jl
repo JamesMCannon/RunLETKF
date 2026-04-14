@@ -425,6 +425,42 @@ end
 
 
 """
+    centered_window(i, split_itrs, ntimes) → UnitRange{Int}
+ 
+Return a range of exactly `split_itrs` observation indices centered on `i`,
+clamped to `[1, ntimes]`.  At the boundaries the window is **shifted** (not
+truncated) so it always contains exactly `split_itrs` steps.
+ 
+# Examples
+```julia
+centered_window(5,  5, 20)   # → 3:7   (symmetric)
+centered_window(1,  5, 20)   # → 1:5   (shifted right at left boundary)
+centered_window(20, 5, 20)   # → 16:20 (shifted left at right boundary)
+centered_window(3,  7, 20)   # → 1:7   (left-edge shift)
+```
+"""
+function centered_window(i::Int, split_itrs::Int, ntimes::Int)
+    half = split_itrs ÷ 2
+    lo   = i - half
+    hi   = lo + split_itrs - 1
+ 
+    # Shift window to remain inside [1, ntimes]
+    if lo < 1
+        lo = 1
+        hi = split_itrs
+    elseif hi > ntimes
+        hi = ntimes
+        lo = ntimes - split_itrs + 1
+    end
+ 
+    # Hard clamp in case ntimes < split_itrs
+    lo = max(lo, 1)
+    hi = min(hi, ntimes)
+ 
+    return lo:hi
+end
+
+"""
     first_t_with_agreement(A::KeyedArray, frac; atol=0.0)
 
 Return the first `t` key such that for every path, at least `frac`

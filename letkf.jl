@@ -125,6 +125,37 @@ function runletkf(parameters)
         state = merge(state, (; rx_phi_offset))
     end
 
+    # Intermediate bias history — only for windowed split filter (split_itrs > 1).
+    #   tx_pwrs_history       (pwrs, ens, split_ens, t=1:ntimes, wstep=1:split_itrs)
+    #   rx_phi_offset_history (path, ens, split_ens, t=1:ntimes, wstep=1:split_itrs)
+    #   window_obs            Matrix{Int}(ntimes, split_itrs)  — data time index j
+    #                         consumed at each (main iteration i, window step k)
+    if (:tx in statetypes || :rx in statetypes) && filtertype == :split && split_itrs > 1
+        if :tx in statetypes
+            tx_pwrs_history = KeyedArray(
+                fill(NaN, length(state.tx_pwrs.pwrs), ens_size, split_ens_size,
+                     ntimes, split_itrs);
+                pwrs      = state.tx_pwrs.pwrs,
+                ens       = 1:ens_size,
+                split_ens = 1:split_ens_size,
+                t         = 1:ntimes,
+                wstep     = 1:split_itrs)
+            state = merge(state, (; tx_pwrs_history))
+        end
+        if :rx in statetypes
+            rx_phi_offset_history = KeyedArray(
+                fill(NaN, npaths, ens_size, split_ens_size, ntimes, split_itrs);
+                path      = state.rx_phi_offset.path,
+                ens       = 1:ens_size,
+                split_ens = 1:split_ens_size,
+                t         = 1:ntimes,
+                wstep     = 1:split_itrs)
+            state = merge(state, (; rx_phi_offset_history))
+        end
+        window_obs = zeros(Int, ntimes, split_itrs)
+        state = merge(state, (; window_obs))
+    end
+
     # TODO if tx_pwrs contains dims :split_ens, rebuildpaths should take 
     # dropdims(mean(z.tx_pwrs, dims=:split_ens), dims=:split_ens) as input rather 
     # than z.tx_pwrs itself.
@@ -237,14 +268,95 @@ function runletkf(parameters)
             xold = merge(xold, (; rx_phi_offset))
         end
 
-        if :rx in statetypes || :tx in statetypes
+        # ── Kalman update ─────────────────────────────────────────────────────────
+        if filtertype == :split && split_itrs > 1 && (:rx in statetypes || :tx in statetypes)
+            # Windowed pre-update: bias refined over split_itrs observations before
+            # the single xy_state update.  After each bias_only_update! call, `yb`
+            # reflects H(xb) under the current bias means; accumulated corrections
+            # telescope to a single correction from prior to final estimate.
+
+            # yb aliases ym(t=i-1); bias corrections accumulate in-place so that
+            # ym(t=i-1) holds the bias-corrected predictions after the loop.
+            yb = H!(xold, i-1)
+
+            win_tx_pwrs       = haskey(xold, :tx_pwrs)       ? deepcopy(xold.tx_pwrs)       : nothing
+            win_rx_phi_offset = haskey(xold, :rx_phi_offset) ? deepcopy(xold.rx_phi_offset) : nothing
+
+            # TX clamped after each step so out-of-bounds values never feed forward
+            # as a prior.  RX is already constrained to {0,1,2,3} in split_rx_update!.
+            for (k, j) in enumerate(centered_window(i, split_itrs, ntimes))
+                @info "  Windowed bias pre-update" main_t=i wstep=k window_obs=j
+                new_tx, new_rx = bias_only_update!(yb, win_tx_pwrs, win_rx_phi_offset,
+                                                   data(t=j), R; ρ=ρ)
+                if !isnothing(new_tx)
+                    new_tx(:NLK)[new_tx(:NLK) .< NLK_LOWER] .= NLK_LOWER
+                    new_tx(:NLK)[new_tx(:NLK) .> NLK_UPPER] .= NLK_UPPER
+                    new_tx(:NML)[new_tx(:NML) .< NML_LOWER] .= NML_LOWER
+                    new_tx(:NML)[new_tx(:NML) .> NML_UPPER] .= NML_UPPER
+                    win_tx_pwrs = new_tx
+                    state.tx_pwrs_history(t=i, wstep=k) .= win_tx_pwrs
+                end
+                if !isnothing(new_rx)
+
+                    # Guard: break mode ties in rx_phi_offset before update
+                    n_ties_broken = 0
+                    for p in new_rx.path
+                        for e in new_rx.ens
+                            if filtertype == :split
+                                vals = strip(new_rx(path=p, ens=e))  # 1D over split_ens
+                            else
+                                vals = strip(new_rx(path=p))          # 1D over ens
+                            end
+
+                            counts = [count(==(b), vals) for b in 0:3]
+                            max_count = maximum(counts)
+                            tied_values = findall(==(max_count), counts) .- 1  # back to 0-indexed {0,1,2,3}
+
+                            if length(tied_values) > 1
+                                winner, loser = tied_values[randperm(rng, length(tied_values))[1:2]]
+                                loser_idx = findfirst(==(loser), vals)
+                                if !isnothing(loser_idx)
+                                    if filtertype == :split
+                                        new_rx(path=p, ens=e)[loser_idx] = winner
+                                    else
+                                        new_rx(path=p)[loser_idx] = winner
+                                    end
+                                    n_ties_broken += 1
+                                end
+                            end
+
+                            # For !split, the outer ens loop is redundant — break after first iteration
+                            filtertype != :split && break
+                        end
+                    end
+                    if n_ties_broken > 0
+                        @info "Broke mode ties in rx_phi_offset" n_ties_broken filtertype
+                    end
+
+                    win_rx_phi_offset = new_rx
+                    state.rx_phi_offset_history(t=i, wstep=k) .= win_rx_phi_offset
+                end
+                state.window_obs[i, k] = j
+            end
+
+            xnew_xy = xy_update_only(yb, xold.xy_state, data(t=i), R;
+                ρ=ρ, localization=localization, datatypes=datatypes)
+
+            xnew = (; xy_state = xnew_xy)
+            if !isnothing(win_tx_pwrs)
+                xnew = merge(xnew, (; tx_pwrs = win_tx_pwrs))
+            end
+            if !isnothing(win_rx_phi_offset)
+                xnew = merge(xnew, (; rx_phi_offset = win_rx_phi_offset))
+            end
+
+        elseif :rx in statetypes || :tx in statetypes
             xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
-            localization=localization, datatypes=datatypes, filtertype=filtertype)
+                localization=localization, datatypes=datatypes, filtertype=filtertype)
         else
             xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
-            localization=localization, datatypes=datatypes)
+                localization=localization, datatypes=datatypes)
         end
-        #TODO figure out how to apply additional split_itrs if filtertype is split without rerunning the forward model.
 
         # Constrain beta and h' to physically realistic values
         xnew.xy_state(:b)[xnew.xy_state(:b) .< MIN_BETA] .= MIN_BETA

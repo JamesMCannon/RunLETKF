@@ -286,7 +286,7 @@ function runletkf(parameters)
             # as a prior.  RX is already constrained to {0,1,2,3} in split_rx_update!.
             for (k, j) in enumerate(centered_window(i, split_itrs, ntimes))
                 @info "  Windowed bias pre-update" main_t=i wstep=k window_obs=j
-                new_tx, new_rx = MVAI.bias_only_update!(yb, win_tx_pwrs, win_rx_phi_offset,
+                new_tx, new_rx = MVIA.bias_only_update!(yb, win_tx_pwrs, win_rx_phi_offset,
                                                    data(t=j), R; ρ=ρ)
                 if !isnothing(new_tx)
                     new_tx(:NLK)[new_tx(:NLK) .< NLK_LOWER] .= NLK_LOWER

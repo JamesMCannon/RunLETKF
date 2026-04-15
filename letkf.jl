@@ -56,10 +56,16 @@ function runletkf(parameters)
     end
 
     if :tx in statetypes || :rx in statetypes
-        @unpack split_ens_size, split_itrs, filtertype = parameters()
-            if split_itrs > length(data.t)
-                error("More split filter iterations specified than data time steps available")
-            end
+        # split/dual filter parameters are required by the LETKF rx/tx paths but
+        # not by the :categorical rx path. Default sensibly so users can run
+        # `RX_METHOD=categorical DO_RX=true` without also setting `DO_DUAL=true`.
+        rx_method_check = get(parameters(), :rx_method, :letkf)
+        split_ens_size = get(parameters(), :split_ens_size, ens_size)
+        split_itrs     = get(parameters(), :split_itrs, 1)
+        filtertype     = get(parameters(), :filtertype, :stacked)
+        if rx_method_check != :categorical && split_itrs > length(data.t)
+            error("More split filter iterations specified than data time steps available")
+        end
     end
 
     if :tx in statetypes
@@ -87,7 +93,22 @@ function runletkf(parameters)
 
     if :rx in statetypes
         @unpack precondition_rx, shuffle_rx, rx_offsets = parameters()
-        if filtertype != :split
+        rx_method = get(parameters(), :rx_method, :letkf)
+
+        if rx_method == :categorical
+            # Categorical path: per-path log-posterior over k ∈ {0,1,2,3} accumulates
+            # evidence across iterations. `rx_phi_offset` is kept (sampled per-member
+            # from the posterior each iteration) so heatmaps and saves stay compatible.
+            rx_phi_logpost = KeyedArray(
+                fill(0.0, npaths, 4, ntimes+1);
+                path = pathname.(paths), k = 0:3, t = 0:ntimes)
+            # Uniform prior at t=0 (zeros = log of unnormalized uniform; normalize on read)
+            rx_phi_offset = KeyedArray(
+                fill(NaN, npaths, ens_size, ntimes+1);
+                path = pathname.(paths), ens = 1:ens_size, t = 0:ntimes)
+            rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size)
+            @info "rx_phi_offset using :categorical update path"
+        elseif filtertype != :split
             rx_phi_offset = KeyedArray(fill(NaN,npaths,ens_size,ntimes+1), path = pathname.(paths), ens=1:ens_size, t=0:ntimes)
             rx_phi_offset(t=0) .= rand(rng, 0:3, npaths, ens_size) #with only 4 possible values, we initialize with a uniform distribution of [0,3]
         else
@@ -123,6 +144,9 @@ function runletkf(parameters)
     end
     if :rx in statetypes
         state = merge(state, (; rx_phi_offset))
+        if get(parameters(), :rx_method, :letkf) == :categorical
+            state = merge(state, (; rx_phi_logpost))
+        end
     end
 
     # Intermediate bias history — only for windowed split filter (split_itrs > 1).
@@ -173,9 +197,86 @@ function runletkf(parameters)
 
     H!(x, t) = ensemble_model!(ym(t=t), forward_model, x)
 
+    # Categorical RX path uses a different H! that samples per-member k from the
+    # current log-posterior. Closure captures `rng` and the live `state.rx_phi_logpost`.
+    rx_method = (:rx in statetypes) ? get(parameters(), :rx_method, :letkf) : :letkf
+    rx_commit_threshold = (rx_method == :categorical) ?
+        get(parameters(), :rx_commit_threshold, 1.0) : 1.0
+    H_cat!(x, t, log_post_t) = ensemble_model!(ym(t=t), forward_model, x, log_post_t, rng;
+                                               commit_threshold=rx_commit_threshold)
+
     for i in 1:ntimes
         start_time = Dates.now()
         @info "Iteration" i=i start_time
+
+        # ── Categorical RX branch ─────────────────────────────────────────────
+        # Self-contained: forward model with per-member sampled k, accumulate
+        # log-posterior, then do an xy_state-only LETKF update on the resulting yb.
+        # Skips all LETKF rx_phi_offset machinery (tie-breaking, split paths, etc.).
+        if rx_method == :categorical
+            # Carry posterior forward (will be incremented in-place by accumulation)
+            state.rx_phi_logpost(t=i) .= state.rx_phi_logpost(t=i-1)
+
+            xy_state_in = shuffle_xy ? begin
+                @info "Shuffling XY Grid Elements of State Vector"
+                shuffled_xy = deepcopy(state.xy_state(t=i-1))
+                for x in shuffled_xy.x, y in shuffled_xy.y, f in shuffled_xy.field
+                    var = std(shuffled_xy(x=x,y=y,field=f))
+                    if (f == :h && var < 1.5) || (f == :b && var < 0.024)
+                        shuffled_xy(x=x,y=y,field=f) .= shuffle(shuffled_xy(x=x,y=y,field=f))
+                    end
+                end
+                shuffled_xy
+            end : state.xy_state(t=i-1)
+
+            # Local buffer for this iteration's per-member sampled offsets.
+            # Avoids relying on AxisKeys view-vs-copy semantics in `state.rx_phi_offset(t=i)`.
+            rx_buf = KeyedArray(
+                fill(NaN, npaths, ens_size);
+                path = state.rx_phi_offset.path, ens = state.rx_phi_offset.ens)
+
+            xold = (; xy_state = xy_state_in, rx_phi_offset = rx_buf)
+            if :tx in statetypes
+                tx_pwrs_in = deepcopy(state.tx_pwrs(t=i-1))
+                if shuffle_tx
+                    for tx in tx_pwrs_in.pwrs
+                        tx_pwrs_in(pwrs=tx) .= shuffle(tx_pwrs_in(pwrs=tx))
+                    end
+                end
+                xold = merge(xold, (; tx_pwrs = tx_pwrs_in))
+            end
+
+            # Run forward model with per-member sampled offsets. H_cat! writes the
+            # drawn offsets into xold.rx_phi_offset (== rx_buf) and returns yb.
+            yb = H_cat!(xold, i-1, state.rx_phi_logpost(t=i))
+
+            # Persist what was actually used at this iteration
+            state.rx_phi_offset(t=i) .= rx_buf
+
+            # Accumulate evidence into log-posterior at t=i
+            MVIA.categorical_rx_update!(state.rx_phi_logpost(t=i), yb,
+                                        rx_buf, data(t=i), R)
+
+            # xy_state LETKF update on the offset-corrected yb (no extra forward call)
+            xnew_xy = MVIA.xy_only_update(yb, xold.xy_state, data(t=i), R;
+                ρ=ρ, localization=localization, datatypes=datatypes)
+
+            xnew_xy(:b)[xnew_xy(:b) .< MIN_BETA] .= MIN_BETA
+            xnew_xy(:b)[xnew_xy(:b) .> MAX_BETA] .= MAX_BETA
+            xnew_xy(:h)[xnew_xy(:h) .< MIN_H]    .= MIN_H
+            xnew_xy(:h)[xnew_xy(:h) .> MAX_H]    .= MAX_H
+            state.xy_state(t=i) .= xnew_xy
+
+            if :tx in statetypes
+                # tx_pwrs not updated in categorical-rx-only branch; carry forward.
+                state.tx_pwrs(t=i) .= xold.tx_pwrs
+            end
+
+            @info "Elapsed" Δt=canonicalize(Dates.now() - start_time)
+            jldsave(joinpath(resdir(scenario), "$scenario.jld2"); state, data, ym)
+            continue
+        end
+        # ── End categorical branch; standard LETKF path follows ───────────────
 
         #TODO adapt shuffle to handle split_ens and move to dedicated function for readability
         if :tx in statetypes

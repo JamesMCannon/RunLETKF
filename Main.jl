@@ -94,13 +94,18 @@ end
 
 do_tx = :tx in params.statetypes
 do_rx = :rx in params.statetypes
+epp = params.epp
 
 if !do_tx && !do_rx
-    scenario = "baseline_"
+    if epp == "none"
+        scenario = "baseline_"
+    else
+        scenario = epp*"_"
+    end
 elseif do_tx && !do_rx
     scenario = "tx_pwrs_"
 elseif !do_tx && do_rx
-    scenario = "rx_R2projected_"   
+    scenario = "rx_zerosumcircle_"   
 else
     scenario = "tx_rx_"
 end

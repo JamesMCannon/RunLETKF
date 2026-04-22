@@ -50,9 +50,15 @@ function runletkf(parameters)
         if background_state.xy_state.ens != 1:ens_size
             error("Ensemble size mismatch")
         end
-        init_t = first_t_with_agreement(background_state.rx_phi_offset, 0.85)
-        xy_state(t=0) .= background_state.xy_state(t=init_t+3)
-        @info "Stacked state vector starting with $(init_t+3)th iteration from file"
+        if :rx in statetypes
+            init_t = first_t_with_agreement(background_state.rx_phi_offset, 0.85) + 3
+            @info "Stacked state vector starting with $(init_t+3)th iteration from file"
+        else
+            init_t = 10
+            @info "Starting with final t of xy_file $(xy_file)"
+        end
+        xy_state(t=0) .= background_state.xy_state(t=init_t)
+        
     end
 
     if :tx in statetypes || :rx in statetypes
@@ -370,90 +376,92 @@ function runletkf(parameters)
         end
 
         # ── Kalman update ─────────────────────────────────────────────────────────
-        if filtertype == :split && split_itrs > 1 && (:rx in statetypes || :tx in statetypes)
-            # Windowed pre-update: bias refined over split_itrs observations before
-            # the single xy_state update.  After each bias_only_update! call, `yb`
-            # reflects H(xb) under the current bias means; accumulated corrections
-            # telescope to a single correction from prior to final estimate.
+        if :rx in statetypes || :tx in statetypes
+            if filtertype == :split && split_itrs > 1 
+                # Windowed pre-update: bias refined over split_itrs observations before
+                # the single xy_state update.  After each bias_only_update! call, `yb`
+                # reflects H(xb) under the current bias means; accumulated corrections
+                # telescope to a single correction from prior to final estimate.
 
-            # yb aliases ym(t=i-1); bias corrections accumulate in-place so that
-            # ym(t=i-1) holds the bias-corrected predictions after the loop.
-            yb = H!(xold, i-1)
+                # yb aliases ym(t=i-1); bias corrections accumulate in-place so that
+                # ym(t=i-1) holds the bias-corrected predictions after the loop.
+                yb = H!(xold, i-1)
 
-            win_tx_pwrs       = haskey(xold, :tx_pwrs)       ? deepcopy(xold.tx_pwrs)       : nothing
-            win_rx_phi_offset = haskey(xold, :rx_phi_offset) ? deepcopy(xold.rx_phi_offset) : nothing
+                win_tx_pwrs       = haskey(xold, :tx_pwrs)       ? deepcopy(xold.tx_pwrs)       : nothing
+                win_rx_phi_offset = haskey(xold, :rx_phi_offset) ? deepcopy(xold.rx_phi_offset) : nothing
 
-            # TX clamped after each step so out-of-bounds values never feed forward
-            # as a prior.  RX is already constrained to {0,1,2,3} in split_rx_update!.
-            for (k, j) in enumerate(centered_window(i, split_itrs, ntimes))
-                @info "  Windowed bias pre-update" main_t=i wstep=k window_obs=j
-                new_tx, new_rx = MVIA.bias_only_update!(yb, win_tx_pwrs, win_rx_phi_offset,
-                                                   data(t=j), R; ρ=ρ)
-                if !isnothing(new_tx)
-                    new_tx(:NLK)[new_tx(:NLK) .< NLK_LOWER] .= NLK_LOWER
-                    new_tx(:NLK)[new_tx(:NLK) .> NLK_UPPER] .= NLK_UPPER
-                    new_tx(:NML)[new_tx(:NML) .< NML_LOWER] .= NML_LOWER
-                    new_tx(:NML)[new_tx(:NML) .> NML_UPPER] .= NML_UPPER
-                    win_tx_pwrs = new_tx
-                    state.tx_pwrs_history(t=i, wstep=k) .= win_tx_pwrs
-                end
-                if !isnothing(new_rx)
+                # TX clamped after each step so out-of-bounds values never feed forward
+                # as a prior.  RX is already constrained to {0,1,2,3} in split_rx_update!.
+                for (k, j) in enumerate(centered_window(i, split_itrs, ntimes))
+                    @info "  Windowed bias pre-update" main_t=i wstep=k window_obs=j
+                    new_tx, new_rx = MVIA.bias_only_update!(yb, win_tx_pwrs, win_rx_phi_offset,
+                                                    data(t=j), R; ρ=ρ)
+                    if !isnothing(new_tx)
+                        new_tx(:NLK)[new_tx(:NLK) .< NLK_LOWER] .= NLK_LOWER
+                        new_tx(:NLK)[new_tx(:NLK) .> NLK_UPPER] .= NLK_UPPER
+                        new_tx(:NML)[new_tx(:NML) .< NML_LOWER] .= NML_LOWER
+                        new_tx(:NML)[new_tx(:NML) .> NML_UPPER] .= NML_UPPER
+                        win_tx_pwrs = new_tx
+                        state.tx_pwrs_history(t=i, wstep=k) .= win_tx_pwrs
+                    end
+                    if !isnothing(new_rx)
 
-                    # Guard: break mode ties in rx_phi_offset before update
-                    n_ties_broken = 0
-                    for p in new_rx.path
-                        for e in new_rx.ens
-                            if filtertype == :split
-                                vals = strip(new_rx(path=p, ens=e))  # 1D over split_ens
-                            else
-                                vals = strip(new_rx(path=p))          # 1D over ens
-                            end
-
-                            counts = [count(==(b), vals) for b in 0:3]
-                            max_count = maximum(counts)
-                            tied_values = findall(==(max_count), counts) .- 1  # back to 0-indexed {0,1,2,3}
-
-                            if length(tied_values) > 1
-                                winner, loser = tied_values[randperm(rng, length(tied_values))[1:2]]
-                                loser_idx = findfirst(==(loser), vals)
-                                if !isnothing(loser_idx)
-                                    if filtertype == :split
-                                        new_rx(path=p, ens=e)[loser_idx] = winner
-                                    else
-                                        new_rx(path=p)[loser_idx] = winner
-                                    end
-                                    n_ties_broken += 1
+                        # Guard: break mode ties in rx_phi_offset before update
+                        n_ties_broken = 0
+                        for p in new_rx.path
+                            for e in new_rx.ens
+                                if filtertype == :split
+                                    vals = strip(new_rx(path=p, ens=e))  # 1D over split_ens
+                                else
+                                    vals = strip(new_rx(path=p))          # 1D over ens
                                 end
+
+                                counts = [count(==(b), vals) for b in 0:3]
+                                max_count = maximum(counts)
+                                tied_values = findall(==(max_count), counts) .- 1  # back to 0-indexed {0,1,2,3}
+
+                                if length(tied_values) > 1
+                                    winner, loser = tied_values[randperm(rng, length(tied_values))[1:2]]
+                                    loser_idx = findfirst(==(loser), vals)
+                                    if !isnothing(loser_idx)
+                                        if filtertype == :split
+                                            new_rx(path=p, ens=e)[loser_idx] = winner
+                                        else
+                                            new_rx(path=p)[loser_idx] = winner
+                                        end
+                                        n_ties_broken += 1
+                                    end
+                                end
+
+                                # For !split, the outer ens loop is redundant — break after first iteration
+                                filtertype != :split && break
                             end
-
-                            # For !split, the outer ens loop is redundant — break after first iteration
-                            filtertype != :split && break
                         end
-                    end
-                    if n_ties_broken > 0
-                        @info "Broke mode ties in rx_phi_offset" n_ties_broken filtertype
-                    end
+                        if n_ties_broken > 0
+                            @info "Broke mode ties in rx_phi_offset" n_ties_broken filtertype
+                        end
 
-                    win_rx_phi_offset = new_rx
-                    state.rx_phi_offset_history(t=i, wstep=k) .= win_rx_phi_offset
+                        win_rx_phi_offset = new_rx
+                        state.rx_phi_offset_history(t=i, wstep=k) .= win_rx_phi_offset
+                    end
+                    state.window_obs[i, k] = j
                 end
-                state.window_obs[i, k] = j
-            end
 
-            xnew_xy = MVIA.xy_only_update(yb, xold.xy_state, data(t=i), R;
-                ρ=ρ, localization=localization, datatypes=datatypes)
+                xnew_xy = MVIA.xy_only_update(yb, xold.xy_state, data(t=i), R;
+                    ρ=ρ, localization=localization, datatypes=datatypes)
 
-            xnew = (; xy_state = xnew_xy)
-            if !isnothing(win_tx_pwrs)
-                xnew = merge(xnew, (; tx_pwrs = win_tx_pwrs))
-            end
-            if !isnothing(win_rx_phi_offset)
-                xnew = merge(xnew, (; rx_phi_offset = win_rx_phi_offset))
-            end
+                xnew = (; xy_state = xnew_xy)
+                if !isnothing(win_tx_pwrs)
+                    xnew = merge(xnew, (; tx_pwrs = win_tx_pwrs))
+                end
+                if !isnothing(win_rx_phi_offset)
+                    xnew = merge(xnew, (; rx_phi_offset = win_rx_phi_offset))
+                end
 
-        elseif :rx in statetypes || :tx in statetypes
-            xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
-                localization=localization, datatypes=datatypes, filtertype=filtertype)
+            else
+                xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
+                    localization=localization, datatypes=datatypes, filtertype=filtertype)
+            end
         else
             xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
                 localization=localization, datatypes=datatypes)

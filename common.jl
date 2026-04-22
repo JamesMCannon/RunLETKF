@@ -122,7 +122,7 @@ function sample_values(A::KeyedArray, n::Int; rng=Random.default_rng())
 end
 
 """
-observations(name,σamp, σphase)
+observations(name, σamp, σphase)
 
 From filename "name" read in a JLD2 file of amp and phase measurments and randomly add noise from provided σamp, σphase.
 """
@@ -144,7 +144,7 @@ function observations(name, σamp, σphase; paths=buildpaths(), rng=reset_rng())
 end
 
 """
-observations(name,σamp, σphase)
+observations(name, σamp, σphase)
 
 From filename "name" read in a JLD2 file of amp and phase measurments and randomly add noise from provided σamp, σphase.
 """
@@ -197,12 +197,18 @@ function init_params()
         error("Unknown time and pathset combination: ", timeofday, " ", pathset)
     end
 
+    epp = get(ENV, "EPP", "none")
+
     if pathset == "Standard"
         paths = buildpaths()
         datafile = "Inputs/"*timeofday*"1"
     elseif pathset == "AVID"
         paths = buildAVIDpaths()
-        datafile = "Inputs/"*timeofday*"1_buildAVIDpaths"
+        if epp == "none"
+            datafile = "Inputs/"*timeofday*"1_buildAVIDpaths"
+        else
+            datafile = "Inputs/"*timeofday*"1_"*epp
+        end
     elseif pathset == "AVIDPLUS"
         paths = buildAVIDpluspaths()
         datafile = "Inputs/"*timeofday*"1_buildAVIDpluspaths"
@@ -261,7 +267,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
-    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, itp, hB, bB, h0, b0)
+    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, itp, hB, bB, h0, b0, epp)
 end
 
 function init_rx_params(p)

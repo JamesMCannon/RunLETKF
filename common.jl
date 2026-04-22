@@ -235,7 +235,7 @@ function init_params()
     @unpack west, east, south, north, modelproj = common_simulation()
 
     # Setup Grid
-    dr = 300e3
+    dr = parse(Float64, get(ENV, "DR_KM", "300")) * 1e3
     lengthscale = 600e3
     modelsteps = ((;dr, lengthscale),)
 
@@ -398,6 +398,10 @@ function name_scenario(scenario, parameters)
     end
 
     scenario = scenario * timeofday*"1"*pathset
+
+    if dr != 300 * 1e3
+        scenario = scenario*"_$(Int(dr/1e3))dr"
+    end
 
     @info "Scenario: "*scenario
     return scenario

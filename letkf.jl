@@ -52,13 +52,48 @@ function runletkf(parameters)
         end
         if :rx in statetypes
             init_t = first_t_with_agreement(background_state.rx_phi_offset, 0.85) + 3
-            @info "Stacked state vector starting with $(init_t+3)th iteration from file"
+            @info "Stacked state vector starting with $(init_t)th iteration from file"
         else
             init_t = 10
             @info "Starting with final t of xy_file $(xy_file)"
         end
-        xy_state(t=0) .= background_state.xy_state(t=init_t)
-        
+
+        src = background_state.xy_state(t=init_t)
+    
+        old_x_grid = axiskeys(src, :x)
+        old_y_grid = axiskeys(src, :y)
+    
+        if old_x_grid == x_grid && old_y_grid == y_grid
+            xy_state(t=0) .= src
+            @info "Grids match; directly assigned xy_state from file at iteration $(init_t)"
+        else
+            @info "Grids don't match; interpolating new grid values from old grid"
+
+            old_locmask = .!isnan.(vec(parent(src(:h)(ens=1))))
+            old_itppts = MVIA.build_xygrid(old_locmask, old_x_grid, old_y_grid)
+            old_itp = MVIA.ScatteredInterpolant(SI.GeneralizedPolyharmonic(1,1), modelproj, old_itppts)
+    
+            locmask = anylocal(localization)
+            CI = CartesianIndices((length(y_grid), length(x_grid)))
+    
+            for e in 1:ens_size
+                for field in (:h, :b)
+                    vals = vec(parent(src(field)(ens=e)))
+                    vgrid = MVIA.dense_grid(old_itp, vals, x_grid, y_grid)
+                    xy_state(field)(t=0, ens=e) .= vgrid
+                end
+            end
+    
+            xy_state(t=0)[:, CI[.!locmask], :] .= NaN
+    
+            # Clamp to physical bounds after interpolation
+            xy_state(:h)(t=0)[xy_state(:h)(t=0) .< MIN_H] .= MIN_H
+            xy_state(:h)(t=0)[xy_state(:h)(t=0) .> MAX_H] .= MAX_H
+            xy_state(:b)(t=0)[xy_state(:b)(t=0) .< MIN_BETA] .= MIN_BETA
+            xy_state(:b)(t=0)[xy_state(:b)(t=0) .> MAX_BETA] .= MAX_BETA
+    
+            @info "Interpolated xy_state from old grid onto new grid; starting from iteration $(init_t)"
+        end        
     end
 
     if :tx in statetypes || :rx in statetypes

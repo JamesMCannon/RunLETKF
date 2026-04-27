@@ -326,7 +326,7 @@ function init_dual_params(p)
 end
 
 function name_scenario(scenario, parameters)
-    @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, timeofday, pathset = parameters()
+    @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, timeofday, pathset, modelsteps = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)"
 
     shuffle_check = false
@@ -399,8 +399,8 @@ function name_scenario(scenario, parameters)
 
     scenario = scenario * timeofday*"1"*pathset
 
-    if dr != 300 * 1e3
-        scenario = scenario*"_$(Int(dr/1e3))dr"
+    if modelsteps[1].dr != 300 * 1e3
+        scenario = scenario*"_$(Int(modelsteps[1].dr /1e3))dr"
     end
 
     @info "Scenario: "*scenario

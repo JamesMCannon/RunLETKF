@@ -244,8 +244,17 @@ function init_params()
     trans = Proj.Transformation(modelproj, MVIA.wgs84())
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
+    
     localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
-    filterbounds!(localization, lola, west, east, south, north)
+    localization_mask = get(ENV, "LOCALIZATION_MASK", "RECTANGLE")
+    if localization_mask == "RECTANGLE"
+        filterbounds!(localization, lola, west, east, south, north)
+    elseif localization_mask =="KRIGING"
+        varmap = MVIA.krigingmask(paths, modelproj, x_grid, y_grid; pathstep=pathstep)
+        filterbounds!(localization, varmap, 0.2^2)
+    else
+        error("Unknown localization mask: "*localization_mask)
+    end
 
     # Build interpolant (needed for plots)
     itppts = MVIA.build_xygrid(MVIA.anylocal(localization), x_grid, y_grid)
@@ -267,7 +276,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
-    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, itp, hB, bB, h0, b0, epp)
+    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, hB, bB, h0, b0, epp)
 end
 
 function init_rx_params(p)
@@ -326,7 +335,8 @@ function init_dual_params(p)
 end
 
 function name_scenario(scenario, parameters)
-    @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, timeofday, pathset, modelsteps = parameters()
+    @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, 
+    timeofday, pathset, modelsteps, localization_mask = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)"
 
     shuffle_check = false
@@ -398,6 +408,8 @@ function name_scenario(scenario, parameters)
     end
 
     scenario = scenario * timeofday*"1"*pathset
+
+    scenario = scenario * "_" * localization_mask[1]
 
     if modelsteps[1].dr != 300 * 1e3
         scenario = scenario*"_$(Int(modelsteps[1].dr /1e3))dr"

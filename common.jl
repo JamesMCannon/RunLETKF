@@ -244,7 +244,6 @@ function init_params()
     trans = Proj.Transformation(modelproj, MVIA.wgs84())
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
-    
     localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
     localization_mask = get(ENV, "LOCALIZATION_MASK", "RECTANGLE")
     if localization_mask == "RECTANGLE"
@@ -276,7 +275,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
-    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, hB, bB, h0, b0, epp)
+    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, h_off, b_off, hB, bB, h0, b0, epp)
 end
 
 function init_rx_params(p)
@@ -336,8 +335,16 @@ end
 
 function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, 
-    timeofday, pathset, modelsteps, localization_mask = parameters()
+    timeofday, pathset, modelsteps, localization_mask, h_off, b_off = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)"
+
+    if h_off !=0
+        scenario = scenario * "_h$(h_off)"
+    end
+    if b_off !=0
+        intb_off = Int(b_off*100)
+        scenario = scenario * "_b$(intb_off)"
+    end
 
     shuffle_check = false
     if :tx in statetypes
@@ -389,8 +396,16 @@ function name_scenario(scenario, parameters)
     if precondition_rx || precondition_tx
         @unpack filtertype = parameters()
         if filtertype == :split
-            @unpack split_itrs, split_ens_size = parameters()
-            scenario = scenario*"_split_$(split_itrs)splititrs_$(split_ens_size)splitens"
+            check = true
+            if precondition_rx
+                if rx_method == :categorical
+                    check = false
+                end
+            end
+            if check
+                @unpack split_itrs, split_ens_size = parameters()
+                scenario = scenario*"_split_$(split_itrs)splititrs_$(split_ens_size)splitens"
+            end
         elseif filtertype == :dual
             scenario = scenario*"_dual"
         else

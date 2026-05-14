@@ -298,12 +298,12 @@ function init_rx_params(p)
     rx_scenario = parse(Int, get(ENV, "RX_SCENARIO", "0"))
     # Hook: switch between full LETKF treatment of rx_phi_offset (:letkf, default,
     # preserves existing workflow) and Bayesian categorical accumulation
-    # (:categorical, exploits k_p ∈ {0,1,2,3} discreteness and time-constancy).
+    # (:categorical, exploits Bϕ ∈ {0,1,2,3} discreteness and time-constancy).
     rx_method = Symbol(get(ENV, "RX_METHOD", "letkf"))
     rx_method in (:letkf, :categorical) ||
         error("Unknown RX_METHOD: $rx_method. Must be :letkf or :categorical.")
     # When rx_method == :categorical, paths whose posterior max exceeds this
-    # threshold use the MAP k deterministically (all members get the same offset)
+    # # threshold use the MAP Bϕ deterministically (all members get the same offset)
     # instead of sampling. Stabilizes the xy_state LETKF update by collapsing
     # phase-ensemble spread once a path is confident. Set to 1.0 to always sample.
     rx_commit_threshold = parse(Float64, get(ENV, "RX_COMMIT_THRESHOLD", "0.7"))

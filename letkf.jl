@@ -137,12 +137,12 @@ function runletkf(parameters)
         rx_method = get(parameters(), :rx_method, :letkf)
 
         if rx_method == :categorical
-            # Categorical path: per-path log-posterior over k ∈ {0,1,2,3} accumulates
+            # Categorical path: per-path log-posterior over Bϕ ∈ {0,1,2,3} accumulates
             # evidence across iterations. `rx_phi_offset` is kept (sampled per-member
             # from the posterior each iteration) so heatmaps and saves stay compatible.
             rx_phi_logpost = KeyedArray(
                 fill(0.0, npaths, 4, ntimes+1);
-                path = pathname.(paths), k = 0:3, t = 0:ntimes)
+                path = pathname.(paths), Bϕ = 0:3, t = 0:ntimes)
             # Uniform prior at t=0 (zeros = log of unnormalized uniform; normalize on read)
             rx_phi_offset = KeyedArray(
                 fill(NaN, npaths, ens_size, ntimes+1);
@@ -238,7 +238,7 @@ function runletkf(parameters)
 
     H!(x, t) = ensemble_model!(ym(t=t), forward_model, x)
 
-    # Categorical RX path uses a different H! that samples per-member k from the
+    # Categorical RX path uses a different H! that samples per-member Bϕ from the
     # current log-posterior. Closure captures `rng` and the live `state.rx_phi_logpost`.
     rx_method = (:rx in statetypes) ? get(parameters(), :rx_method, :letkf) : :letkf
     rx_commit_threshold = (rx_method == :categorical) ?
@@ -251,7 +251,7 @@ function runletkf(parameters)
         @info "Iteration" i=i start_time
 
         # ── Categorical RX branch ─────────────────────────────────────────────
-        # Self-contained: forward model with per-member sampled k, accumulate
+        # Self-contained: forward model with per-member sampled Bϕ, accumulate
         # log-posterior, then do an xy_state-only LETKF update on the resulting yb.
         # Skips all LETKF rx_phi_offset machinery (tie-breaking, split paths, etc.).
         if rx_method == :categorical

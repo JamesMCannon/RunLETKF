@@ -54,7 +54,7 @@ function runletkf(parameters)
             init_t = first_t_with_agreement(background_state.rx_phi_offset, 0.85) + 3
             @info "Stacked state vector starting with $(init_t)th iteration from file"
         else
-            init_t = 10
+            init_t = 8
             @info "Starting with final t of xy_file $(xy_file)"
         end
 
@@ -287,18 +287,26 @@ function runletkf(parameters)
                 xold = merge(xold, (; tx_pwrs = tx_pwrs_in))
             end
 
-            # Run forward model with per-member sampled offsets. H_cat! writes the
-            # drawn offsets into xold.rx_phi_offset (== rx_buf) and returns yb.
+            # Run forward model with per-member sampled offsets drawn from the
+            # PRIOR posterior. H_cat! writes the drawn offsets into
+            # xold.rx_phi_offset (== rx_buf) and returns yb.
             yb = H_cat!(xold, i-1, state.rx_phi_logpost(t=i))
 
-            # Persist what was actually used at this iteration
-            state.rx_phi_offset(t=i) .= rx_buf
-
-            # Accumulate evidence into log-posterior at t=i
+            # Accumulate this iteration's evidence into the log-posterior at t=i.
             MVIA.categorical_rx_update!(state.rx_phi_logpost(t=i), yb,
                                         rx_buf, data(t=i), R)
 
-            # xy_state LETKF update on the offset-corrected yb (no extra forward call)
+            # Re-sample from the freshly-updated posterior and patch yb so the
+            # xy_state update uses post-evidence offsets rather than the
+            # pre-evidence samples baked in by H_cat!. rx_buf is overwritten
+            # with the new draws.
+            MVIA.posterior_resample_correct!(yb, rx_buf, state.rx_phi_logpost(t=i),
+                                             rng; commit_threshold=rx_commit_threshold)
+
+            # Persist what was actually used for the xy_state update.
+            state.rx_phi_offset(t=i) .= rx_buf
+
+            # xy_state LETKF update on the patched yb (no extra forward call).
             xnew_xy = MVIA.xy_only_update(yb, xold.xy_state, data(t=i), R;
                 ρ=ρ, localization=localization, datatypes=datatypes)
 

@@ -244,7 +244,6 @@ function init_params()
     trans = Proj.Transformation(modelproj, MVIA.wgs84())
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
-    
     localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
     localization_mask = get(ENV, "LOCALIZATION_MASK", "RECTANGLE")
     if localization_mask == "RECTANGLE"
@@ -289,7 +288,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
-    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, estimator_name, hB, bB, h0, b0, epp)
+    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, estimator_name, h_off, b_off, hB, bB, h0, b0, epp)
 end
 
 function init_rx_params(p)
@@ -349,8 +348,16 @@ end
 
 function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, 
-    timeofday, pathset, modelsteps, localization_mask, estimator_name = parameters()
+    timeofday, pathset, modelsteps, localization_mask,  h_off, b_off, estimator_name = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)_$(estimator_name)"
+
+    if h_off !=0
+        scenario = scenario * "_h$(h_off)"
+    end
+    if b_off !=0
+        intb_off = Int(b_off*100)
+        scenario = scenario * "_b$(intb_off)"
+    end
 
     shuffle_check = false
     if :tx in statetypes
@@ -402,8 +409,16 @@ function name_scenario(scenario, parameters)
     if precondition_rx || precondition_tx
         @unpack filtertype = parameters()
         if filtertype == :split
-            @unpack split_itrs, split_ens_size = parameters()
-            scenario = scenario*"_split_$(split_itrs)splititrs_$(split_ens_size)splitens"
+            check = true
+            if precondition_rx
+                if rx_method == :categorical
+                    check = false
+                end
+            end
+            if check
+                @unpack split_itrs, split_ens_size = parameters()
+                scenario = scenario*"_split_$(split_itrs)splititrs_$(split_ens_size)splitens"
+            end
         elseif filtertype == :dual
             scenario = scenario*"_dual"
         else
@@ -414,10 +429,6 @@ function name_scenario(scenario, parameters)
     if xy_file != "false"
         scenario = scenario * "_xy_file"
         @info "Background Ionosphere from file"
-    end
-
-    if new_folder != "false"
-        scenario = "h"*get(ENV, "H_OFF", "0")*"b"* get(ENV, "B_OFF", "0")*scenario
     end
 
     scenario = scenario * timeofday*"1"*pathset

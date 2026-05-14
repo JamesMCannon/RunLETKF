@@ -2,7 +2,7 @@
 
 julia_version = "1.10.10"
 manifest_format = "2.0"
-project_hash = "05492e38b49d98eae445caa5c214ddb2c96623b3"
+project_hash = "ca9857a993882082cce80d17218df1447d77f10b"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "27cecae79e5cc9935255f90c53bb831cc3c870d7"
@@ -690,6 +690,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "6d6219a004b8cf1e0b4dbe27a2860b8e04eba0be"
 uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
 version = "3.3.11+0"
+
+[[deps.FaradayInternationalReferenceIonosphere]]
+deps = ["Artifacts", "DelimitedFiles", "Interpolations", "Statistics", "TypedTables"]
+git-tree-sha1 = "f87b12734c3d3fb586bb378e6a7b38413151db40"
+uuid = "13f5a3bc-1e41-4c76-a7e5-29a214aba9ea"
+version = "0.2.4"
 
 [[deps.FastBroadcast]]
 deps = ["ArrayInterface", "LinearAlgebra", "Polyester", "Static", "StaticArrayInterface", "StrideArraysCore"]
@@ -2642,6 +2648,14 @@ deps = ["Colors", "GeometricalPredicates", "Random"]
 git-tree-sha1 = "622ff938ca2ccd56d00357dbecd8e67002dbaa40"
 uuid = "72f80fcb-8c52-57d9-aff0-40c1a3526986"
 version = "0.4.4"
+
+[[deps.WaitProfileEstimators]]
+deps = ["Dates", "FaradayInternationalReferenceIonosphere", "LinearAlgebra", "Statistics"]
+git-tree-sha1 = "0fece0491a6252d7f7a16c2f6a408fe6b18bdd56"
+repo-rev = "main"
+repo-url = "https://github.com/JamesMCannon/WaitProfileEstimators.jl"
+uuid = "396636b3-103e-4ec1-bf9c-f09d60477106"
+version = "0.1.0"
 
 [[deps.WoodburyMatrices]]
 deps = ["LinearAlgebra", "SparseArrays"]

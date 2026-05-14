@@ -13,7 +13,7 @@ using Dates
 using Base.Threads
 using ProgressMeter
 
-using LMPTools
+using LMPTools, WaitProfileEstimators
 
 using ModifiedVLFInversionAlgorithms
 

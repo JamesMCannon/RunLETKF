@@ -269,14 +269,27 @@ function init_params()
     b_off = parse(Float64, get(ENV, "B_OFF", "0"))
     #These two commands allow brute force testing of initial background ensemble means. Generally should be left at
 
-    hb0 = [LMPTools.ferguson(ll[2], LMPTools.zenithangle(ll[2], ll[1], dt), dt) for ll in lola]
+    estimator_name = get(ENV, "WAIT_ESTIMATOR", "FERGUSON")
+    if     estimator_name == "FIRI"
+        back_estimator = FIRIFit()
+    elseif estimator_name == "MCRAETHOMSON" || estimator_name == "THOMSON"
+        back_estimator = McRaeThomson()
+    elseif estimator_name == "FERGUSON"
+        back_estimator = Ferguson()
+    else
+        throw(ArgumentError(
+            "Unknown WAIT_ESTIMATOR='$estimator_name'. " *
+            "Options: FERGUSON (default), FIRI, MCRAETHOMSON (alias THOMSON)."))
+    end
+
+    hb0 = [hprime_beta(back_estimator, ll, dt) for ll in lola]
     h0 = getindex.(hb0, 1) .+ h_off
     b0 = getindex.(hb0, 2) .+ b_off
 
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
-    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, hB, bB, h0, b0, epp)
+    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, estimator_name, hB, bB, h0, b0, epp)
 end
 
 function init_rx_params(p)
@@ -336,8 +349,8 @@ end
 
 function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, 
-    timeofday, pathset, modelsteps, localization_mask = parameters()
-    scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)"
+    timeofday, pathset, modelsteps, localization_mask, estimator_name = parameters()
+    scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)_$(estimator_name)"
 
     shuffle_check = false
     if :tx in statetypes

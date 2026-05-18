@@ -105,7 +105,7 @@ if !do_tx && !do_rx
 elseif do_tx && !do_rx
     scenario = "tx_pwrs_"
 elseif !do_tx && do_rx
-    scenario = "rx_zerosumcircle_"   
+    scenario = "rx_sig_"   
 else
     scenario = "tx_rx_"
 end

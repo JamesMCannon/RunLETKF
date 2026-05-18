@@ -133,7 +133,7 @@ function runletkf(parameters)
     end
 
     if :rx in statetypes
-        @unpack precondition_rx, shuffle_rx, rx_offsets = parameters()
+        @unpack precondition_rx, shuffle_rx, rx_offsets, η = parameters()
         rx_method = get(parameters(), :rx_method, :letkf)
 
         if rx_method == :categorical
@@ -294,7 +294,7 @@ function runletkf(parameters)
 
             # Accumulate this iteration's evidence into the log-posterior at t=i.
             MVIA.categorical_rx_update!(state.rx_phi_logpost(t=i), yb,
-                                        rx_buf, data(t=i), R)
+                                        rx_buf, data(t=i), R, η=η)
 
             # Re-sample from the freshly-updated posterior and patch yb so the
             # xy_state update uses post-evidence offsets rather than the

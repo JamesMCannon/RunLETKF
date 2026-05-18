@@ -307,6 +307,8 @@ function init_rx_params(p)
     # instead of sampling. Stabilizes the xy_state LETKF update by collapsing
     # phase-ensemble spread once a path is confident. Set to 1.0 to always sample.
     rx_commit_threshold = parse(Float64, get(ENV, "RX_COMMIT_THRESHOLD", "0.7"))
+    η = parse(Float64, get(ENV, "RX_TEMPER", "1.0"))
+    (0 < η ≤ 1) || error("RX_TEMPER (η) must be in (0, 1]; got $η")
     if rx_scenario == 0
         rx_offsets = rx_offsets0(p.paths)
     elseif rx_scenario == 1
@@ -314,7 +316,7 @@ function init_rx_params(p)
     else
         error("Unknown RX_SCENARIO: ", rx_scenario)
     end
-    return merge(p, (; statetypes, precondition_rx, shuffle_rx, rx_offsets, rx_scenario, rx_method, rx_commit_threshold))
+    return merge(p, (; statetypes, precondition_rx, shuffle_rx, rx_offsets, rx_scenario, rx_method, rx_commit_threshold, η))
 end
 
 function init_tx_params(p)
@@ -383,6 +385,8 @@ function name_scenario(scenario, parameters)
         rx_method = get(parameters(), :rx_method, :letkf)
         if rx_method == :categorical
             scenario = scenario * "_rxcat"
+            η_rx = get(parameters(), :η, 1.0)
+            η_rx == 1.0 || (scenario = scenario * "_eta$(η_rx)")
         end
     end
     if :xy in statetypes

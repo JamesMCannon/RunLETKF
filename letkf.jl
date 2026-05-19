@@ -221,6 +221,35 @@ function runletkf(parameters)
         state = merge(state, (; window_obs))
     end
 
+
+    # ── Resume from existing checkpoint ───────────────────────────────────────
+    savefile  = joinpath(resdir(scenario), "$scenario.jld2")
+    start_iter = 1
+    if isfile(savefile)
+        saved       = load(savefile)
+        saved_state = saved["state"]
+
+        # bail out if the saved file doesn't match current parameters
+        if keys(saved_state) != keys(state) ||
+        size(saved_state.xy_state) != size(state.xy_state)
+            error("Saved file for $scenario is incompatible with current parameters")
+        end
+
+        # highest iteration that actually has data written
+        last_done = something(
+            findlast(t -> !all(isnan, saved_state.xy_state(t=t)), 1:ntimes), 0)
+
+        if last_done == ntimes
+            @info "Scenario $scenario already complete; returning saved results"
+            return saved_state, saved["data"], saved["ym"]
+        elseif last_done > 0
+            @info "Resuming $scenario from iteration $(last_done+1)/$ntimes"
+            state = saved_state
+            ym    = saved["ym"]
+            start_iter = last_done + 1
+        end
+    end
+
     # TODO if tx_pwrs contains dims :split_ens, rebuildpaths should take 
     # dropdims(mean(z.tx_pwrs, dims=:split_ens), dims=:split_ens) as input rather 
     # than z.tx_pwrs itself.
@@ -246,7 +275,7 @@ function runletkf(parameters)
     H_cat!(x, t, log_post_t) = ensemble_model!(ym(t=t), forward_model, x, log_post_t, rng;
                                                commit_threshold=rx_commit_threshold)
 
-    for i in 1:ntimes
+    for i in start_iter:ntimes
         start_time = Dates.now()
         @info "Iteration" i=i start_time
 

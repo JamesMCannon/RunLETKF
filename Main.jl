@@ -38,14 +38,16 @@ const DATALENGTH = 10
 
 ### Set Common parameters
 params = init_params()
-if parse(Bool, get(ENV, "DO_RX", "false"))
+do_rx = parse(Bool, get(ENV, "DO_RX", "false"))
+do_tx = parse(Bool, get(ENV, "DO_TX", "false"))
+if do_rx
     params = init_rx_params(params)
 end
-if parse(Bool, get(ENV, "DO_TX", "false"))
+if do_tx
     params = init_tx_params(params)
 end
-if parse(Bool, get(ENV, "DO_DUAL", "false"))
-    params = init_dual_params(params)
+if do_rx || do_tx
+    params = init_filter_params(params)
 end
 
 data = observations(params.datafile, params.σamp, params.σphase, paths=params.paths)

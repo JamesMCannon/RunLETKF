@@ -287,8 +287,9 @@ function init_params()
 
     @assert length(h0) == length(hB) == ncells
 
-    return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, timeofday, pathset, 
-    dt, paths, datafile, σamp, σphase, R, pathstep, modelsteps, x_grid, y_grid, localization, localization_mask, itp, estimator_name, h_off, b_off, hB, bB, h0, b0, epp)
+    return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
+    timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, R, pathstep, modelsteps, 
+    x_grid, y_grid, localization, localization_mask, itp, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 
 function init_rx_params(p)
@@ -313,12 +314,11 @@ function init_rx_params(p)
     else
         error("Unknown RX_SCENARIO: ", rx_scenario)
     end
-    return merge(p, (; statetypes, rx_offsets, rx_scenario, rx_commit_threshold, η))
+    return merge(p, (; statetypes, rx_scenario, rx_commit_threshold, η, rx_offsets))
 end
 
 function init_tx_params(p)
     statetypes = (p.statetypes..., :tx)
-    precondition_tx = parse(Bool, get(ENV, "PRECONDITION_TX", "false"))
     shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
 
     NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
@@ -329,13 +329,11 @@ function init_tx_params(p)
 
     TX_range = parse(Float64, get(ENV, "TX_RANGE_KW", "500")) * 1000 #convert to watts
 
-    shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
-
     σTXkw = Int(σTX/1000)
-    return merge(p, (; statetypes, precondition_tx, shuffle_tx, σNLK, σNML, σTXkw, NLKb, NMLb, TX_range))
+    return merge(p, (; statetypes, shuffle_tx, NLKb, NMLb, σNLK, σNML, TX_range, σTXkw))
 end
 
-function init_dual_params(p)
+function init_filter_params(p)
     split_ens_size = parse(Int, get(ENV, "SPLIT_ENS_SIZE", "-1")) # Default value means use ens_size
     if split_ens_size == -1
         split_ens_size = p.ens_size
@@ -397,10 +395,7 @@ function name_scenario(scenario, parameters)
         end 
     end
 
-    precondition_rx = get(parameters(), :precondition_rx, false)#TODO should maybe just be do_rx/do_tx
-    precondition_tx = get(parameters(), :precondition_tx, false)
-
-    if precondition_tx
+    if :tx in statetypes || :rx in statetypes
         @unpack filtertype = parameters()
         if filtertype == :split
             @unpack split_itrs, split_ens_size = parameters()

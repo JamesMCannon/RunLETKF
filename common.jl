@@ -161,7 +161,7 @@ function init_params()
     ### Read parameters from environment variables, with defaults if not set.
     new_folder = get(ENV, "NEW_FOLDER", "false")
 
-    ens_size = parse(Int, get(ENV, "ENS_SIZE", "2"))
+    ens_size = parse(Int, get(ENV, "ENS_SIZE", "4"))
     ntimes = parse(Int, get(ENV, "ITRS", "1"))
     shuffle_xy = parse(Bool, get(ENV, "SHUFFLE_XY", "false"))
     ρ = parse(Float64, get(ENV, "RHO","1.1"))
@@ -183,7 +183,7 @@ function init_params()
 
     ### Determine which data file to use based on time of day and exact array configuration.
     timeofday = get(ENV,"TOD","day")
-    pathset = get(ENV, "PATHS", "Standard")
+    pathset = get(ENV, "PATHS", "AVID")
 
     if timeofday == "day" && pathset == "Standard"
         dt = DateTime(2020, 3, 1, 20, 00) #using Dates
@@ -235,7 +235,7 @@ function init_params()
     @unpack west, east, south, north, modelproj = common_simulation()
 
     # Setup Grid
-    dr = parse(Float64, get(ENV, "DR_KM", "300")) * 1e3
+    dr = parse(Float64, get(ENV, "DR_KM", "200")) * 1e3
     lengthscale = 600e3
     modelsteps = ((;dr, lengthscale),)
 
@@ -245,7 +245,7 @@ function init_params()
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
     localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
-    localization_mask = get(ENV, "LOCALIZATION_MASK", "RECTANGLE")
+    localization_mask = get(ENV, "LOCALIZATION_MASK", "KRIGING")
     if localization_mask == "RECTANGLE"
         filterbounds!(localization, lola, west, east, south, north)
     elseif localization_mask =="KRIGING"
@@ -268,7 +268,7 @@ function init_params()
     b_off = parse(Float64, get(ENV, "B_OFF", "0"))
     #These two commands allow brute force testing of initial background ensemble means. Generally should be left at
 
-    estimator_name = get(ENV, "WAIT_ESTIMATOR", "FERGUSON")
+    estimator_name = get(ENV, "WAIT_ESTIMATOR", "THOMSON")
     if     estimator_name == "FIRI"
         back_estimator = FIRIFit()
     elseif estimator_name == "MCRAETHOMSON" || estimator_name == "THOMSON"

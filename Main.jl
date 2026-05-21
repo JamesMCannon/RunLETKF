@@ -114,6 +114,6 @@ scenario = name_scenario(scenario, parameters)
 
 params = merge(params, (; scenario))
 
-isdir(resdir(scenario)) || mkdir(resdir(scenario))
+isdir(resdir(scenario)) || mkpath(resdir(scenario))
 
 state, data, ym = runletkf(parameters)

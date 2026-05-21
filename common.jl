@@ -293,22 +293,19 @@ end
 
 function init_rx_params(p)
     statetypes = (p.statetypes..., :rx)
-    precondition_rx = parse(Bool, get(ENV, "PRECONDITION_RX", "false"))
-    shuffle_rx = parse(Bool, get(ENV, "SHUFFLE_RX", "false"))
     rx_scenario = parse(Int, get(ENV, "RX_SCENARIO", "0"))
-    # Hook: switch between full LETKF treatment of rx_phi_offset (:letkf, default,
-    # preserves existing workflow) and Bayesian categorical accumulation
-    # (:categorical, exploits Bϕ ∈ {0,1,2,3} discreteness and time-constancy).
-    rx_method = Symbol(get(ENV, "RX_METHOD", "letkf"))
-    rx_method in (:letkf, :categorical) ||
-        error("Unknown RX_METHOD: $rx_method. Must be :letkf or :categorical.")
-    # When rx_method == :categorical, paths whose posterior max exceeds this
-    # # threshold use the MAP Bϕ deterministically (all members get the same offset)
-    # instead of sampling. Stabilizes the xy_state LETKF update by collapsing
-    # phase-ensemble spread once a path is confident. Set to 1.0 to always sample.
-    rx_commit_threshold = parse(Float64, get(ENV, "RX_COMMIT_THRESHOLD", "0.7"))
+
+    # Paths whose normalized posterior max exceeds this threshold use the MAP Bϕ
+    # deterministically (all members same offset) instead of per-member sampling.
+    # Collapses phase-ensemble spread once a path is confident, stabilizing the
+    # xy_state update. Set to 1.0 to always sample.
+    rx_commit_threshold = parse(Float64, get(ENV, "RX_COMMIT_THRESHOLD", "1.0"))
+
+    # Optional learning rate that tempers per-iteration evidence to prevent
+    # overconfidence in early iterations.
     η = parse(Float64, get(ENV, "RX_TEMPER", "1.0"))
     (0 < η ≤ 1) || error("RX_TEMPER (η) must be in (0, 1]; got $η")
+
     if rx_scenario == 0
         rx_offsets = rx_offsets0(p.paths)
     elseif rx_scenario == 1
@@ -316,7 +313,7 @@ function init_rx_params(p)
     else
         error("Unknown RX_SCENARIO: ", rx_scenario)
     end
-    return merge(p, (; statetypes, precondition_rx, shuffle_rx, rx_offsets, rx_scenario, rx_method, rx_commit_threshold, η))
+    return merge(p, (; statetypes, rx_offsets, rx_scenario, rx_commit_threshold, η))
 end
 
 function init_tx_params(p)
@@ -377,17 +374,10 @@ function name_scenario(scenario, parameters)
         scenario = scenario * "_log10"
     end
     if :rx in statetypes
-        @unpack shuffle_rx, rx_scenario = parameters()
-        if shuffle_rx
-            shuffle_check=true
-        end
+        @unpack rx_scenario = parameters()
         scenario = scenario * "_rx_scen_$rx_scenario"
-        rx_method = get(parameters(), :rx_method, :letkf)
-        if rx_method == :categorical
-            scenario = scenario * "_rxcat"
-            η_rx = get(parameters(), :η, 1.0)
-            η_rx == 1.0 || (scenario = scenario * "_eta$(η_rx)")
-        end
+        η_rx = get(parameters(), :η, 1.0)
+        η_rx == 1.0 || (scenario = scenario * "_eta$(η_rx)")
     end
     if :xy in statetypes
         @unpack shuffle_xy = parameters()
@@ -410,19 +400,11 @@ function name_scenario(scenario, parameters)
     precondition_rx = get(parameters(), :precondition_rx, false)#TODO should maybe just be do_rx/do_tx
     precondition_tx = get(parameters(), :precondition_tx, false)
 
-    if precondition_rx || precondition_tx
+    if precondition_tx
         @unpack filtertype = parameters()
         if filtertype == :split
-            check = true
-            if precondition_rx
-                if rx_method == :categorical
-                    check = false
-                end
-            end
-            if check
-                @unpack split_itrs, split_ens_size = parameters()
-                scenario = scenario*"_split_$(split_itrs)splititrs_$(split_ens_size)splitens"
-            end
+            @unpack split_itrs, split_ens_size = parameters()
+            scenario = scenario*"_split_$(split_itrs)splititrs_$(split_ens_size)splitens"
         elseif filtertype == :dual
             scenario = scenario*"_dual"
         else

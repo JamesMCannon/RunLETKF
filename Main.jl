@@ -33,7 +33,7 @@ const MAX_BETA = 0.90
 const MIN_H = 55
 const MAX_H = 90
 
-# Sets size of simulated data - effectively sets the maximum number of LETKF iterations.
+# Sets size of simulated data - effectively sets the maximum number of filter iterations.
 const DATALENGTH = 10
 
 ### Set Common parameters

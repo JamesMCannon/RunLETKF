@@ -412,7 +412,7 @@ function name_scenario(scenario, parameters)
         @info "Background Ionosphere from file"
     end
 
-    scenario = scenario * timeofday*"1"*pathset
+    scenario = scenario * "_" timeofday*"1"*pathset
 
     scenario = scenario * "_" * localization_mask[1]
 

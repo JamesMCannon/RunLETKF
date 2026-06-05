@@ -408,11 +408,12 @@ function name_scenario(scenario, parameters)
     end
 
     if xy_file != "false"
-        scenario = scenario * "_xy_file"
+        file_t = parse(Int, get(ENV, "FILE_T","-1"))
+        scenario = scenario * "_xy_file_$file_t"
         @info "Background Ionosphere from file"
     end
 
-    scenario = scenario * "_" timeofday*"1"*pathset
+    scenario = scenario * "_" * timeofday*"1"*pathset
 
     scenario = scenario * "_" * localization_mask[1]
 

@@ -47,16 +47,20 @@ function runletkf(parameters)
         xy_state(:h)(t=0) .= h_init
         xy_state(:b)(t=0) .= b_init
     else
+        file_t = parse(Int, get(ENV, "FILE_T","-1"))
         background_state = load(xy_file,"state")
+        @info "Loaded background state from file =  $xy_file"
         if background_state.xy_state.ens != 1:ens_size
             error("Ensemble size mismatch")
         end
-        if :rx in statetypes
+        if :rx in statetypes && file_t == -1
             init_t = first_t_with_agreement(background_state.rx_phi_offset, 0.85) + 3
-            @info "Stacked state vector starting with $(init_t)th iteration from file"
+            @info "RX agreement found, starting with $(init_t)th iteration from file"
+        elseif file_t != -1
+            init_t = file_t
+            @info "Starting with t of xy_file t = $(init_t)"
         else
-            init_t = 8
-            @info "Starting with final t of xy_file $(xy_file)"
+            init_t = DATALENGTH  
         end
 
         src = background_state.xy_state(t=init_t)

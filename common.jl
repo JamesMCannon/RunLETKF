@@ -128,7 +128,7 @@ From filename "name" read in a JLD2 file of amp and phase measurments and random
 """
 function observations(name, σamp, σphase; paths=buildpaths(), rng=reset_rng())
 
-    obs_fname = name*".jld2"
+    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
     f = jldopen(obs_fname, "r")
     obsamp, obsphase = f["obsamp"], f["obsphase"]
 
@@ -150,7 +150,7 @@ From filename "name" read in a JLD2 file of amp and phase measurments and random
 """
 function observations(name)
     
-    obs_fname = name*".jld2"
+    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
     f = jldopen(obs_fname, "r")
     data = f["params"].data.contents
 

@@ -125,6 +125,7 @@ end
 observations(name, σamp, σphase)
 
 From filename "name" read in a JLD2 file of amp and phase measurments and randomly add noise from provided σamp, σphase.
+This selects and converts data from Z0Hy to By in dB re 1 pT.
 """
 function observations(name, σamp, σphase; paths=buildpaths(), rng=reset_rng())
 
@@ -135,10 +136,14 @@ function observations(name, σamp, σphase; paths=buildpaths(), rng=reset_rng())
     npaths = length(paths)
     data = KeyedArray(Array{Float64,3}(undef, 4, npaths, DATALENGTH);
         field=[:amp, :phase, :amp_noiseless, :phase_noiseless], path=MVIA.pathname.(paths), t=1:DATALENGTH)
-    data(:amp_noiseless) .= obsamp
-    data(:phase_noiseless) .= obsphase
-    data(:amp) .= obsamp .+ σamp.*randn(rng, npaths, DATALENGTH)
-    data(:phase) .= obsphase .+ σphase.*randn(rng, npaths, DATALENGTH)
+
+    amp_pT   = obsamp[:,5] .- (20log10(C0) - 120)   # dB re 1 pT, Z₀Hy column
+    phase_Hy = obsphase[:,5] 
+
+    data(:amp_noiseless) .= amp_pT # Convert to dB re 1 pT from dB re 1 uV/m
+    data(:phase_noiseless) .= phase_Hy
+    data(:amp) .= amp_pT .+ σamp.*randn(rng, npaths, DATALENGTH)
+    data(:phase) .= phase_Hy .+ σphase.*randn(rng, npaths, DATALENGTH)
 
     return data
 end

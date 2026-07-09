@@ -4,7 +4,7 @@ Pkg.activate(@__DIR__)
 
 using JLD2
 using LongwaveModePropagator
-using LongwaveModePropagator: QE, ME, waitsparameter
+using LongwaveModePropagator: QE, ME, C0, waitsparameter
 using AxisKeys, StableRNGs, Parameters, Random
 using ScatteredInterpolation, Proj 
 using LinearAlgebra, Distributions, StatsBase

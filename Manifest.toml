@@ -2,7 +2,7 @@
 
 julia_version = "1.10.10"
 manifest_format = "2.0"
-project_hash = "ca9857a993882082cce80d17218df1447d77f10b"
+project_hash = "aeab2aff8525e6cab2b45216325378ba56f6d91d"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "27cecae79e5cc9935255f90c53bb831cc3c870d7"
@@ -687,9 +687,9 @@ version = "1.10.0"
 
 [[deps.FFTW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "6d6219a004b8cf1e0b4dbe27a2860b8e04eba0be"
+git-tree-sha1 = "6866aec60ef98e3164cd8d6855225684207e9dff"
 uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
-version = "3.3.11+0"
+version = "3.3.12+0"
 
 [[deps.FaradayInternationalReferenceIonosphere]]
 deps = ["Artifacts", "DelimitedFiles", "Interpolations", "Statistics", "TypedTables"]
@@ -1153,9 +1153,9 @@ version = "8.4.0+0"
 
 [[deps.LibGEOS]]
 deps = ["CEnum", "Extents", "GEOS_jll", "GeoInterface"]
-git-tree-sha1 = "0f8a16784c1f239b32a4b1fc56c915269c44be08"
+git-tree-sha1 = "7e6532862e2970e645ad762da4725c601a7c9ae9"
 uuid = "a90b1aa1-3769-5649-ba7e-abc5a9d163eb"
-version = "0.9.6"
+version = "0.9.7"
 
     [deps.LibGEOS.extensions]
     LibGEOSMakieExt = "Makie"
@@ -1320,9 +1320,9 @@ version = "2025.2.0+0"
 
 [[deps.MLJModelInterface]]
 deps = ["InteractiveUtils", "REPL", "Random", "ScientificTypesBase", "StatisticalTraits"]
-git-tree-sha1 = "ccaa3f7938890ee8042cc970ba275115428bd592"
+git-tree-sha1 = "c275fae2e693206b4527dd9d2382aa15359ef3ed"
 uuid = "e80e1ace-859a-464e-9ed9-23947d8ae3ea"
-version = "1.12.0"
+version = "1.12.1"
 
 [[deps.MPICH_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Hwloc_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "MPIPreferences", "TOML"]
@@ -1353,9 +1353,9 @@ uuid = "d125e4d3-2237-4719-b19c-fa641b8a4667"
 version = "0.1.8"
 
 [[deps.MappedArrays]]
-git-tree-sha1 = "2dab0221fe2b0f2cb6754eaa743cc266339f527e"
+git-tree-sha1 = "0ee4497a4e80dbd29c058fcee6493f5219556f40"
 uuid = "dbb5928d-eab1-5f90-85c2-b9b0edb7c900"
-version = "0.4.2"
+version = "0.4.3"
 
 [[deps.Markdown]]
 deps = ["Base64"]
@@ -1418,8 +1418,8 @@ version = "1.1.3"
 [[deps.ModifiedVLFInversionAlgorithms]]
 deps = ["AxisKeys", "Dates", "Distributions", "GeoStats", "GeoTables", "GeographicLib", "ImageFiltering", "Interpolations", "IntervalSets", "LMPTools", "LibGEOS", "LinearAlgebra", "LongwaveModePropagator", "NLopt", "NonlinearSolve", "ProgressMeter", "Proj", "Random", "ScatteredInterpolation", "StaticArrays", "StaticArraysCore", "Statistics", "StatsBase", "TableTransforms", "UnPack"]
 path = "../../ModifiedVLFInversionAlgorithms.jl"
-uuid = "0803ec96-7665-482a-9427-2785addca038"
-version = "0.0.15"
+uuid = "325dd450-e17c-4c65-9110-778031d3fbdc"
+version = "0.1.0"
 
 [[deps.MosaicViews]]
 deps = ["MappedArrays", "OffsetArrays", "PaddedViews", "StackViews"]
@@ -1462,9 +1462,9 @@ version = "1.2.1"
 
 [[deps.NLopt_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "b0154a615d5b2b6cf7a2501123b793577d0b9950"
+git-tree-sha1 = "afe9c70ead884bf4cbb887f188d2db6d8f09d49c"
 uuid = "079eb43e-fd8e-5478-9966-2cf3e3edb778"
-version = "2.10.0+0"
+version = "2.11.0+0"
 
 [[deps.NaNMath]]
 deps = ["OpenLibm_jll"]
@@ -1636,9 +1636,9 @@ version = "0.5.6+0"
 
 [[deps.Optim]]
 deps = ["Compat", "EnumX", "FillArrays", "ForwardDiff", "LineSearches", "LinearAlgebra", "NLSolversBase", "NaNMath", "PositiveFactorizations", "Printf", "SparseArrays", "StatsBase"]
-git-tree-sha1 = "61942645c38dd2b5b78e2082c9b51ab315315d10"
+git-tree-sha1 = "48968edaf014f67e58fe4c8a4ce72d392aed3294"
 uuid = "429524aa-4258-5aef-a3af-852621145aeb"
-version = "1.13.2"
+version = "1.13.3"
 
     [deps.Optim.extensions]
     OptimMOIExt = "MathOptInterface"

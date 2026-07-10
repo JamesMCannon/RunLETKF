@@ -19,6 +19,7 @@ using ModifiedVLFInversionAlgorithms
 
 const MVIA = ModifiedVLFInversionAlgorithms
 const SI = ScatteredInterpolation
+const LMP = LongwaveModePropagator
 # Often functions are called by MVIA.foo() for transparency, even when those same functions are 
 # exported explicitely by MVIA (as an example). This is only to aid in debugging and identifying 
 # which package is at the root of errors should they arise.

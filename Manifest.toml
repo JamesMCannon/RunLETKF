@@ -1296,11 +1296,11 @@ version = "1.2.0"
 
 [[deps.LongwaveModePropagator]]
 deps = ["Dates", "DiffEqCallbacks", "EnumX", "FunctionWrappers", "Interpolations", "JSON3", "LinearAlgebra", "ModifiedHankelFunctionsOfOrderOneThird", "OrdinaryDiffEq", "Parameters", "PolynomialRoots", "ProgressLogging", "Romberg", "RootsAndPoles", "StaticArrays", "StructTypes"]
-git-tree-sha1 = "8c5568cd8ae8ec38bbd0166c9912e16c1f89b737"
-repo-rev = "main"
+git-tree-sha1 = "c884d14eba5a9fd415cb72a812c68d2f4553bdf7"
+repo-rev = "IO_H_fields"
 repo-url = "https://github.com/JamesMCannon/LongwaveModePropagator.jl"
 uuid = "38c6559a-e0a7-48c6-827d-3f02e2d19cec"
-version = "0.4.3"
+version = "0.4.2"
 
 [[deps.LossFunctions]]
 deps = ["Markdown", "Requires", "Statistics"]

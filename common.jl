@@ -122,6 +122,71 @@ function sample_values(A::KeyedArray, n::Int; rng=Random.default_rng())
 end
 
 """
+    observations(name, σobs, datatypes; paths=buildpaths(), rng=reset_rng())
+
+Read simulated LMP field-component outputs (`obsamp`, `obsphase`: path × component
+matrices in LMP `Fields` column order, Z₀H amplitudes in dB re 1 µV/m, phases in
+rad) from JLD2 file `name` and construct the noisy observation KeyedArray for the
+requested observable fields in `datatypes` (canonical order (:amp, :phase, :s2, :s3)):
+
+- `:amp`   — Hy amplitude converted to B in dB re 1 pT
+- `:phase` — Hy phase (rad)
+- `:s2`, `:s3` — Cartesian (normalized-Stokes) coordinates of the Hx/Hy ratio via
+  `MVIA.polarization_s2s3` (single source of truth for the sign convention). The
+  Z₀H dB reference cancels in the ratio, so the raw file columns are used directly.
+
+Noise is added independently per observable with the per-field σ from `σobs`
+(a NamedTuple with at least the keys in `datatypes`).
+
+NOTE (deliberate approximation): independent per-observable Gaussian noise is
+the short-circuit consistent with the current scalar diagonal R. Channel-level
+(complex phasor) noise generation — which induces the physically correct
+cross-field error correlations and the SNR-dependent (s2, s3) noise scale — is
+deferred to the R-characterization stage.
+
+For every requested field `f`, a noiseless copy is stored under
+`Symbol(f, "_noiseless")`. The truth is time-constant; each `t` slice is an
+independent noise realization.
+"""
+function observations(name, σobs::NamedTuple, datatypes::Tuple; paths=buildpaths(), rng=reset_rng())
+
+    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
+    f = jldopen(obs_fname, "r")
+    obsamp, obsphase = f["obsamp"], f["obsphase"]
+
+    npaths = length(paths)
+
+    # Component columns follow the LMP Fields enum → column mapping
+    hy = LongwaveModePropagator.index(Fields.Hy)
+    hx = LongwaveModePropagator.index(Fields.Hx)
+
+    truth = Dict{Symbol,Vector{Float64}}()
+    if :amp in datatypes
+        truth[:amp] = obsamp[:, hy] .+ MVIA.ZH_DBUVM_TO_B_DBPT  # Z₀Hy dB µV/m → B dB pT
+    end
+    if :phase in datatypes
+        truth[:phase] = obsphase[:, hy]
+    end
+    if :s2 in datatypes || :s3 in datatypes
+        s2s3 = MVIA.polarization_s2s3.(obsamp[:, hy], obsphase[:, hy],
+                                       obsamp[:, hx], obsphase[:, hx])
+        truth[:s2] = getindex.(s2s3, 1)
+        truth[:s3] = getindex.(s2s3, 2)
+    end
+
+    fields = [collect(datatypes); [Symbol(df, "_noiseless") for df in datatypes]]
+    data = KeyedArray(Array{Float64,3}(undef, length(fields), npaths, DATALENGTH);
+        field=fields, path=MVIA.pathname.(paths), t=1:DATALENGTH)
+
+    for df in datatypes
+        data(field=Symbol(df, "_noiseless")) .= truth[df]
+        data(field=df) .= truth[df] .+ σobs[df] .* randn(rng, npaths, DATALENGTH)
+    end
+
+    return data
+end
+
+"""
 observations(name, σamp, σphase)
 
 From filename "name" read in a JLD2 file of amp and phase measurments and randomly add noise from provided σamp, σphase.
@@ -178,6 +243,12 @@ function init_params()
         statetypes = (statetypes..., :xy)
     end
 
+    ### Observable selection knobs.
+    # Canonical order (:amp, :phase, :s2, :s3) fixes the stacked observation-vector
+    # layout [field₁(paths); field₂(paths); ...] shared by data, R, and the LETKF
+    # updates (see MVIA.fieldrange). :amp/:phase are the absolute Hy observables;
+    # :s2/:s3 are the Cartesian coordinates of the Hx/Hy ratio, invariant to TX
+    # power and to trellis phase offsets common to the two loop channels.
     datatypes = ()
     if parse(Bool, get(ENV, "DO_AMP", "true")) 
         datatypes = (datatypes..., :amp)
@@ -185,6 +256,14 @@ function init_params()
     if parse(Bool, get(ENV, "DO_PHASE", "true"))
         datatypes = (datatypes..., :phase)
     end
+    if parse(Bool, get(ENV, "DO_S2", "false"))
+        datatypes = (datatypes..., :s2)
+    end
+    if parse(Bool, get(ENV, "DO_S3", "false"))
+        datatypes = (datatypes..., :s3)
+    end
+    isempty(datatypes) &&
+        error("No observable types selected: at least one of DO_AMP, DO_PHASE, DO_S2, DO_S3 must be true")
 
     ### Determine which data file to use based on time of day and exact array configuration.
     timeofday = get(ENV,"TOD","day")
@@ -221,17 +300,27 @@ function init_params()
         error("Unknown Pathset: ", pathset)
     end
 
-    ### Construct observations data structure, and related parameters.
+    ### Construct observation-noise parameters.
+    # SIGMA_S2S3 is a placeholder scalar pending receiver-noise characterization:
+    # with a fixed per-channel noise floor, the physical σ on (s2, s3) is
+    # ≈ σ_channel/|Hy| per path per epoch. That structure enters through the
+    # per-path per-epoch R below, which is currently short-circuited to scalars.
     σamp, σphase = 0.1, deg2rad(1.0)
+    σs2s3 = parse(Float64, get(ENV, "SIGMA_S2S3", "0.02"))
+    σobs = (amp=σamp, phase=σphase, s2=σs2s3, s3=σs2s3)
 
     npaths = length(paths)
 
-    R = Float64[]
-    if :amp in datatypes
-        R = [R; fill(σamp^2, npaths)]
-    end
-    if :phase in datatypes
-        R = [R; fill(σphase^2, npaths)]
+    ### Per-path, per-epoch observation-error variance.
+    # R carries dims (field × path × t) so that path- and epoch-dependent values
+    # (e.g. SNR-driven variances, null gating) can be assigned without touching
+    # the filter machinery: each iteration consumes MVIA.stack_R(R(t=i), datatypes).
+    # SHORT-CIRCUIT: every path and epoch currently receives the scalar per-field
+    # variance. Replacing the short-circuit means editing only this fill loop.
+    R = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+        field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    for df in datatypes
+        R(field=df) .= σobs[df]^2
     end
 
     ### Create geospatial grid and related parameters
@@ -293,7 +382,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
-    timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, R, pathstep, modelsteps, 
+    timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, σs2s3, σobs, R, pathstep, modelsteps, 
     x_grid, y_grid, localization, localization_mask, itp, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 
@@ -392,12 +481,14 @@ function name_scenario(scenario, parameters)
         scenario = scenario * "_shuffle"
     end
 
-    if !(:amp in datatypes && :phase in datatypes)
-        if :amp in datatypes
-            scenario = scenario* "_amp_only"
-        elseif :phase in datatypes
-            scenario = scenario * "_phase_only"
-        end 
+    # Observable-set tag. Legacy names are preserved for the single-field Hy cases;
+    # any other non-default combination is tagged with the full datatypes list.
+    if datatypes == (:amp,)
+        scenario = scenario * "_amp_only"
+    elseif datatypes == (:phase,)
+        scenario = scenario * "_phase_only"
+    elseif datatypes != (:amp, :phase)
+        scenario = scenario * "_" * join(String.(datatypes), "_")
     end
 
     if :tx in statetypes || :rx in statetypes

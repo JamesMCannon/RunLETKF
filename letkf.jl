@@ -10,6 +10,7 @@ function runletkf(parameters)
     lengthscale = only(modelsteps).lengthscale
 
     npaths = length(paths)
+    nfields = length(datatypes)
     
     xy_state = KeyedArray(fill(NaN, 2, length(y_grid), length(x_grid), ens_size, ntimes+1),
         field=[:h, :b], y=y_grid, x=x_grid, ens=1:ens_size, t=0:ntimes)
@@ -152,8 +153,10 @@ function runletkf(parameters)
         jldsave(joinpath(resdir(scenario), "rx_offsets_$scenario.jld2"); rx_offsets)
     end
    
-    ym = KeyedArray(Array{Float64,4}(undef, 2, npaths, ens_size, ntimes+1); 
-        field=[:amp, :phase], path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
+    # Ensemble prediction record: one row-block per observable field, in the
+    # canonical datatypes order shared with data and R.
+    ym = KeyedArray(Array{Float64,4}(undef, nfields, npaths, ens_size, ntimes+1); 
+        field=collect(datatypes), path=pathname.(paths), ens=1:ens_size, t=0:ntimes)
 
     state = (; xy_state)
     if :tx in statetypes
@@ -206,16 +209,18 @@ function runletkf(parameters)
     # TODO if tx_pwrs contains dims :split_ens, rebuildpaths should take 
     # dropdims(mean(z.tx_pwrs, dims=:split_ens), dims=:split_ens) as input rather 
     # than z.tx_pwrs itself.
+    # The forward model returns a (field × path) KeyedArray of the requested
+    # observables from a single LMP run per member (see model_observables).
     if :tx in statetypes && :xy in statetypes
          @info "Using forward model with TX power offsets"
          if filtertype == :split
-            forward_model = (z -> model(itp, z.xy_state, rebuildpaths(paths, dropdims(mean(z.tx_pwrs, dims=:split_ens), dims=:split_ens)), dt; pathstep))
+            forward_model = (z -> model_observables(itp, z.xy_state, rebuildpaths(paths, dropdims(mean(z.tx_pwrs, dims=:split_ens), dims=:split_ens)), dt; pathstep, datatypes))
          else
-            forward_model = (z -> model(itp, z.xy_state, rebuildpaths(paths, z.tx_pwrs), dt; pathstep))
+            forward_model = (z -> model_observables(itp, z.xy_state, rebuildpaths(paths, z.tx_pwrs), dt; pathstep, datatypes))
          end
     else
         @info "Using forward model without TX power offsets"
-        forward_model = (z -> model(itp, z.xy_state, paths, dt; pathstep))
+        forward_model = (z -> model_observables(itp, z.xy_state, paths, dt; pathstep, datatypes))
     end
 
     H!(x, t) = ensemble_model!(ym(t=t), forward_model, x)
@@ -228,6 +233,10 @@ function runletkf(parameters)
     for i in start_iter:ntimes
         start_time = Dates.now()
         @info "Iteration" i=i start_time
+
+        # Epoch slice of the per-path, per-epoch observation-error variance,
+        # flattened to the stacked field-major layout consumed by the updates.
+        R_i = MVIA.stack_R(R(t=i), datatypes)
 
         #TODO adapt shuffle to handle split_ens and move to dedicated function for readability
         if :tx in statetypes
@@ -298,7 +307,9 @@ function runletkf(parameters)
             win_tx_pwrs = deepcopy(xold.tx_pwrs)
             for (k, j) in enumerate(centered_window(i, split_itrs, ntimes))
                 @info "  Windowed TX bias pre-update" main_t=i wstep=k window_obs=j
-                new_tx = MVIA.bias_only_update!(yb, win_tx_pwrs, data(t=j), R; ρ=ρ)
+                # Each window observation is weighted by its own epoch's R.
+                new_tx = MVIA.bias_only_update!(yb, win_tx_pwrs, data(t=j),
+                    MVIA.stack_R(R(t=j), datatypes); ρ=ρ, datatypes=datatypes)
                 new_tx(:NLK)[new_tx(:NLK) .< NLK_LOWER] .= NLK_LOWER
                 new_tx(:NLK)[new_tx(:NLK) .> NLK_UPPER] .= NLK_UPPER
                 new_tx(:NML)[new_tx(:NML) .< NML_LOWER] .= NML_LOWER
@@ -310,11 +321,12 @@ function runletkf(parameters)
 
             if :rx in statetypes
                 MVIA.categorical_rx_measupdate!(xold.rx_phi_logpost, yb,
-                    xold.rx_phi_offset, data(t=i), R, rng;
-                    η=η, commit_threshold=rx_commit_threshold, correct_yb=true)
+                    xold.rx_phi_offset, data(t=i), R_i, rng;
+                    η=η, commit_threshold=rx_commit_threshold, correct_yb=true,
+                    datatypes=datatypes)
             end
 
-            xnew_xy = MVIA.xy_only_update(yb, xold.xy_state, data(t=i), R;
+            xnew_xy = MVIA.xy_only_update(yb, xold.xy_state, data(t=i), R_i;
                 ρ=ρ, localization=localization, datatypes=datatypes)
 
             xnew = (; xy_state = xnew_xy, tx_pwrs = win_tx_pwrs)
@@ -324,7 +336,7 @@ function runletkf(parameters)
             end
 
         else 
-            xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R; ρ=ρ,
+            xnew = LETKF_measupdate(x->H!(x,i-1), xold, data(t=i), R_i; ρ=ρ,
                 localization=localization, datatypes=datatypes, filtertype=filtertype,
                 rng=rng, η=η, commit_threshold=rx_commit_threshold)
         end

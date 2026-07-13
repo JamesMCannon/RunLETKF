@@ -19,7 +19,6 @@ using ModifiedVLFInversionAlgorithms
 
 const MVIA = ModifiedVLFInversionAlgorithms
 const SI = ScatteredInterpolation
-const LMP = LongwaveModePropagator
 # Often functions are called by MVIA.foo() for transparency, even when those same functions are 
 # exported explicitely by MVIA (as an example). This is only to aid in debugging and identifying 
 # which package is at the root of errors should they arise.
@@ -51,19 +50,25 @@ if do_rx || do_tx
     params = init_filter_params(params)
 end
 
-data = observations(params.datafile, params.σamp, params.σphase, paths=params.paths)
-
-if !(:amp in params.datatypes && :phase in params.datatypes)
-    if :phase in params.datatypes
-        data = data[Key([:phase, :phase_noiseless]), :, :]
-    elseif :amp in params.datatypes
-        data = data[Key([:amp, :amp_noiseless]), :, :]
-    else
-        error("Whoops! Datatypes don't make sense")
-    end
+### Cross-validate state and observable selections before any expensive work.
+# TX power estimation updates against :amp observations from per-TX paths;
+# categorical RX (Bϕ) estimation accumulates evidence from :phase observations.
+if do_tx && !(:amp in params.datatypes)
+    error("TX power estimation (DO_TX=true) requires :amp observations (DO_AMP=true)")
+end
+if do_rx && !(:phase in params.datatypes)
+    error("RX offset estimation (DO_RX=true) requires :phase observations (DO_PHASE=true)")
 end
 
+# Observations are built for exactly the fields in datatypes (plus their
+# _noiseless copies), so no post-hoc field slicing is performed.
+data = observations(params.datafile, params.σobs, params.datatypes; paths=params.paths)
+
 if :rx in params.statetypes
+    # The per-path Bϕ offset is a property of the (single, synchronized)
+    # demodulation trellis: it shifts the absolute Hy phase only. The ratio
+    # observables (:s2, :s3) are invariant to any trellis offset common to the
+    # two loop channels, so they receive no offset.
     data(:phase) .+= params.rx_offsets .* (π/2)
     data(:phase_noiseless) .+= params.rx_offsets .* (π/2)
 end
@@ -94,6 +99,7 @@ end
 
 ### Bring it all together
 @info "statetypes: " params.statetypes
+@info "datatypes: " params.datatypes
 
 do_tx = :tx in params.statetypes
 do_rx = :rx in params.statetypes

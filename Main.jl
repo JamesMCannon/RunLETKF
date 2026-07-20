@@ -15,7 +15,7 @@ using ProgressMeter
 
 using LMPTools, WaitProfileEstimators
 
-using ModifiedVLFInversionAlgorithms
+using ModifiedVLFInversionAlgorithms #remember to run ] up ModifiedVLFInversionAlgorithms to pull any changes to the branch
 
 const MVIA = ModifiedVLFInversionAlgorithms
 const SI = ScatteredInterpolation
@@ -105,18 +105,20 @@ do_tx = :tx in params.statetypes
 do_rx = :rx in params.statetypes
 epp = params.epp
 
+scenario = "HyHx"
+
 if !do_tx && !do_rx
     if epp == "none"
-        scenario = "baseline_"
+        scenario = scenario * "baseline_"
     else
-        scenario = epp*"_"
+        scenario = scenario * epp*"_"
     end
 elseif do_tx && !do_rx
-    scenario = "tx_pwrs_"
+    scenario = scenario * "tx_pwrs_"
 elseif !do_tx && do_rx
-    scenario = "rx_sig_"   
+    scenario = scenario * "rx_"   
 else
-    scenario = "tx_rx_"
+    scenario = scenario * "tx_rx_"
 end
 
 scenario = name_scenario(scenario, parameters)

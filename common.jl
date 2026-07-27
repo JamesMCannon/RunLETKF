@@ -306,8 +306,9 @@ function init_params()
     # ≈ σ_channel/|Hy| per path per epoch. That structure enters through the
     # per-path per-epoch R below, which is currently short-circuited to scalars.
     σamp, σphase = 0.1, deg2rad(1.0)
-    σs2s3 = parse(Float64, get(ENV, "SIGMA_S2S3", "0.02"))
-    σobs = (amp=σamp, phase=σphase, s2=σs2s3, s3=σs2s3)
+    σs2 = parse(Float64, get(ENV, "SIGMA_S2", "0.05"))
+    σs3 = parse(Float64, get(ENV, "SIGMA_S3", "0.005"))
+    σobs = (amp=σamp, phase=σphase, s2=σs2, s3=σs3)
 
     npaths = length(paths)
 

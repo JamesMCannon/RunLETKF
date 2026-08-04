@@ -305,10 +305,17 @@ function init_params()
     # with a fixed per-channel noise floor, the physical σ on (s2, s3) is
     # ≈ σ_channel/|Hy| per path per epoch. That structure enters through the
     # per-path per-epoch R below, which is currently short-circuited to scalars.
-    σamp, σphase = 0.1, deg2rad(1.0)
+    σamp = parse(Float64, get(ENV, "SIGMA_AMP", "0.1"))
+    σphase = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE", "1")))
     σs2 = parse(Float64, get(ENV, "SIGMA_S2", "0.05"))
     σs3 = parse(Float64, get(ENV, "SIGMA_S3", "0.005"))
     σobs = (amp=σamp, phase=σphase, s2=σs2, s3=σs3)
+
+    σamp_meas = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.1"))
+    σphase_meas = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "1")))
+    σs2_meas = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.05"))
+    σs3_meas = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.005"))
+    σmeas = (amp=σamp_meas, phase=σphase_meas, s2=σs2_meas, s3=σs3_meas)
 
     npaths = length(paths)
 
@@ -383,7 +390,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
-    timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, σs2s3, σobs, R, pathstep, modelsteps, 
+    timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, σs2, σs3, σobs, σmeas, R, pathstep, modelsteps, 
     x_grid, y_grid, localization, localization_mask, itp, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 

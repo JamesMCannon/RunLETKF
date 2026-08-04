@@ -62,7 +62,7 @@ end
 
 # Observations are built for exactly the fields in datatypes (plus their
 # _noiseless copies), so no post-hoc field slicing is performed.
-data = observations(params.datafile, params.σobs, params.datatypes; paths=params.paths)
+data = observations(params.datafile, params.σmeas, params.datatypes; paths=params.paths)
 
 if :rx in params.statetypes
     # The per-path Bϕ offset is a property of the (single, synchronized)

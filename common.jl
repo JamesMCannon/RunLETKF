@@ -363,8 +363,10 @@ function init_params()
 
     ### Build the initial background ensemble parameters. NOTE: for best results, ensure LMPTools.ferguson() has been updated to add 0.15 to Beta. 
     ncells = length(lola)
-    hB = fill(2,ncells) # σ_h′
-    bB = fill(0.04, ncells) # σ_β
+    σ_h = parse(Float64, get(ENV, "SIGMA_H", "2"))
+    σ_B = parse(Float64, get(ENV, "SIGMA_B", "0.04"))
+    hB = fill(σ_h, ncells) # σ_h′
+    bB = fill(σ_B, ncells) # σ_β
 
     h_off = parse(Float64, get(ENV, "H_OFF", "0"))
     b_off = parse(Float64, get(ENV, "B_OFF", "0"))
@@ -391,7 +393,7 @@ function init_params()
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
     timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, σs2, σs3, σobs, σmeas, R, pathstep, modelsteps, 
-    x_grid, y_grid, localization, localization_mask, itp, hB, bB, h_off, b_off, estimator_name, h0, b0)
+    x_grid, y_grid, localization, localization_mask, itp, σ_h, σ_B, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 
 function init_rx_params(p)
@@ -447,7 +449,7 @@ end
 
 function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, 
-    timeofday, pathset, modelsteps, localization_mask,  h_off, b_off, estimator_name = parameters()
+    timeofday, pathset, modelsteps, localization_mask, σ_h, σ_B, h_off, b_off, estimator_name = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)_$(estimator_name)"
 
     if h_off !=0
@@ -456,6 +458,14 @@ function name_scenario(scenario, parameters)
     if b_off !=0
         intb_off = Int(b_off*100)
         scenario = scenario * "_b$(intb_off)"
+    end
+
+    if σ_h !=2
+        scenario = scenario * "_sigh$(σ_h)"
+    end
+    if σ_B !=0.04
+        intb_off = Int(b_off*100)
+        scenario = scenario * "_sigb$(σ_B)"
     end
 
     shuffle_check = false

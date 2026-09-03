@@ -79,6 +79,31 @@ function buildAVIDpaths()
 end
 
 """
+    buildAVIDpaths()
+
+Return a vector of `(Transmitter, Receiver)` propagation paths from the Array for VLF Imaging of the D-region (AVID).
+"""
+function buildreducedAVIDpaths()
+    transmitters = [
+        Transmitter{VerticalDipole}(TRANSMITTER[:NLK].name, TRANSMITTER[:NLK].latitude, TRANSMITTER[:NLK].longitude, TRANSMITTER[:NLK].antenna, TRANSMITTER[:NLK].frequency,240e3),    
+        Transmitter{VerticalDipole}(TRANSMITTER[:NML].name, TRANSMITTER[:NML].latitude, TRANSMITTER[:NML].longitude, TRANSMITTER[:NML].antenna, TRANSMITTER[:NML].frequency, 235e3)
+    ]
+    receivers = [
+        Receiver("WHI", 60.751, -135.101, 0.0, VerticalDipole()),
+        Receiver("RAB", 58.222, -103.680, 0.0, VerticalDipole()),
+        Receiver("FSM", 60.026, -111.931, 0.0, VerticalDipole()),
+        Receiver("CAL", 51.654, -128.133, 0.0, VerticalDipole()),
+        Receiver("FSI", 61.757, -121.229, 0.0, VerticalDipole()),
+        Receiver("PIN", 50.258, -95.865, 0.0, VerticalDipole()),
+        Receiver("ISL", 53.855, -94.660, 0.0, VerticalDipole()),
+        Receiver("GIL", 56.377, -94.644, 0.0, VerticalDipole())
+    ]
+    paths = [(tx, rx) for tx in transmitters for rx in receivers]
+
+    return paths
+end
+
+"""
     buildAVIDpluspaths()
 
 Return a vector of `(Transmitter, Receiver)` propagation paths from AVID including an AARDVARK receiver near Edmonton.
@@ -271,11 +296,11 @@ function init_params()
 
     if timeofday == "day" && pathset == "Standard"
         dt = DateTime(2020, 3, 1, 20, 00) #using Dates
-    elseif timeofday == "day" && (pathset == "AVID" || pathset == "AVIDPLUS")
+    elseif timeofday == "day" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
         dt = DateTime(2025, 6, 1, 19, 00)
-    elseif timeofday == "morning" && (pathset == "AVID" || pathset == "AVIDPLUS")
+    elseif timeofday == "morning" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
         dt = DateTime(2025, 6, 1, 13, 00)
-    elseif timeofday == "night" && (pathset == "AVID" || pathset == "AVIDPLUS")
+    elseif timeofday == "night" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
         dt = DateTime(2025, 6, 2, 7)
     else
         error("Unknown time and pathset combination: ", timeofday, " ", pathset)
@@ -296,6 +321,13 @@ function init_params()
     elseif pathset == "AVIDPLUS"
         paths = buildAVIDpluspaths()
         datafile = "Inputs/"*timeofday*"1_buildAVIDpluspaths"
+    elseif pathset == "reducedAVID"
+        paths = buildreducedAVIDpaths()
+        if epp == "none"
+            datafile = "Inputs/"*timeofday*"1_buildreducedAVIDpaths"
+        else
+            datafile = "Inputs/"*timeofday*"1_"*epp
+        end
     else
         error("Unknown Pathset: ", pathset)
     end

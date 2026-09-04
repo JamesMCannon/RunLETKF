@@ -1417,7 +1417,7 @@ version = "1.1.3"
 
 [[deps.ModifiedVLFInversionAlgorithms]]
 deps = ["AxisKeys", "Dates", "Distributions", "GeoStats", "GeoTables", "GeographicLib", "ImageFiltering", "Interpolations", "IntervalSets", "LMPTools", "LibGEOS", "LinearAlgebra", "LongwaveModePropagator", "NLopt", "NonlinearSolve", "ProgressMeter", "Proj", "Random", "ScatteredInterpolation", "StaticArrays", "StaticArraysCore", "Statistics", "StatsBase", "TableTransforms", "UnPack"]
-git-tree-sha1 = "162ee61c3fc9013ef89a16f2918bc02e4759aafc"
+git-tree-sha1 = "6a35ba99c28a2e7a8ca56922713afce07a6946c0"
 repo-rev = "TEModeEstimation"
 repo-url = "https://github.com/JamesMCannon/ModifiedVLFInversionAlgorithms.jl"
 uuid = "325dd450-e17c-4c65-9110-778031d3fbdc"

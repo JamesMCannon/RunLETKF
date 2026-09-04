@@ -79,9 +79,9 @@ function buildAVIDpaths()
 end
 
 """
-    buildAVIDpaths()
+    buildreducedAVIDpaths()
 
-Return a vector of `(Transmitter, Receiver)` propagation paths from the Array for VLF Imaging of the D-region (AVID).
+Return a vector of `(Transmitter, Receiver)` propagation paths from the Array for VLF Imaging of the D-region (AVID). This removes CH, JU, and PRU from the array.
 """
 function buildreducedAVIDpaths()
     transmitters = [
@@ -364,13 +364,12 @@ function init_params()
     end
 
     ### Create geospatial grid and related parameters
-    pathstep = 50e3 # defined in WGS84
 
-    @unpack west, east, south, north, modelproj = common_simulation()
+    @unpack west, east, south, north, modelproj,
+        pathstep, lengthscale, krig_threshold = common_simulation()
 
     # Setup Grid
     dr = parse(Float64, get(ENV, "DR_KM", "200")) * 1e3
-    lengthscale = 600e3
     modelsteps = ((;dr, lengthscale),)
 
     x_grid, y_grid = MVIA.build_xygrid(west, east, south, north, MVIA.wgs84(), modelproj; dr) #build_xygrid() & wgs84() defined in MVIA
@@ -378,13 +377,13 @@ function init_params()
     trans = Proj.Transformation(modelproj, MVIA.wgs84())
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
-    localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
+    localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale, pathstep=pathstep)
     localization_mask = get(ENV, "LOCALIZATION_MASK", "KRIGING")
     if localization_mask == "RECTANGLE"
         filterbounds!(localization, lola, west, east, south, north)
     elseif localization_mask =="KRIGING"
-        varmap = MVIA.krigingmask(paths, modelproj, x_grid, y_grid; pathstep=pathstep)
-        filterbounds!(localization, varmap, 0.2^2)
+        varmap = MVIA.krigingmask(paths, modelproj, x_grid, y_grid; pathstep=pathstep, range=lengthscale)
+        filterbounds!(localization, varmap, krig_threshold)
     else
         error("Unknown localization mask: "*localization_mask)
     end
@@ -425,7 +424,7 @@ function init_params()
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
     timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, σs2, σs3, σobs, σmeas, R, pathstep, modelsteps, 
-    x_grid, y_grid, localization, localization_mask, itp, σ_h, σ_B, hB, bB, h_off, b_off, estimator_name, h0, b0)
+    x_grid, y_grid, localization, localization_mask, krig_threshold, itp, σ_h, σ_B, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 
 function init_rx_params(p)
@@ -458,7 +457,7 @@ function init_tx_params(p)
     shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
 
     NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
-    NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
+    NMLb = parse(Float64, get(ENV, "NMLB","233")) * 1000
 
     σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
     σNLK, σNML = σTX, σTX
@@ -481,7 +480,8 @@ end
 
 function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, 
-    timeofday, pathset, modelsteps, localization_mask, σ_h, σ_B, h_off, b_off, estimator_name = parameters()
+        timeofday, pathset, modelsteps, localization_mask, krig_threshold, 
+        σ_h, σ_B, h_off, b_off, estimator_name = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)_$(estimator_name)"
 
     if h_off !=0
@@ -496,8 +496,8 @@ function name_scenario(scenario, parameters)
         scenario = scenario * "_sigh$(σ_h)"
     end
     if σ_B !=0.04
-        intb_off = Int(b_off*100)
-        scenario = scenario * "_sigb$(σ_B)"
+        intσ_B = Int(σ_B*100)
+        scenario = scenario * "_sigb$(intσ_B)"
     end
 
     shuffle_check = false
@@ -561,7 +561,11 @@ function name_scenario(scenario, parameters)
 
     scenario = scenario * "_" * timeofday*"1"*pathset
 
-    scenario = scenario * "_" * localization_mask[1]
+    if localization_mask == "KRIGING"
+        scenario = scenario * "_K$(round(Int, 100*sqrt(krig_threshold)))"
+    else
+        scenario = scenario * "_" * localization_mask[1]
+    end
 
     if modelsteps[1].dr != 300 * 1e3
         scenario = scenario*"_$(Int(modelsteps[1].dr /1e3))dr"
@@ -595,7 +599,10 @@ function common_simulation()
     west, east = -136.5, -91
     south, north = 46, 64
 
-    return (;modelproj, west, east, south, north)
+    pathstep = 50e3
+    lengthscale = 600e3          # obs2grid_distance radius and variogram range
+    krig_threshold = 0.2^2
+    return (; modelproj, west, east, south, north, pathstep, lengthscale, krig_threshold)
 end
 
 

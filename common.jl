@@ -175,7 +175,7 @@ independent noise realization.
 """
 function observations(name, σobs::NamedTuple, datatypes::Tuple; paths=buildpaths(), rng=reset_rng())
 
-    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
     f = jldopen(obs_fname, "r")
     obsamp, obsphase = f["obsamp"], f["obsphase"]
 
@@ -211,6 +211,47 @@ function observations(name, σobs::NamedTuple, datatypes::Tuple; paths=buildpath
     return data
 end
 
+function observations(name, σobs::KeyedArray, datatypes::Tuple; paths=buildpaths(), rng=reset_rng())
+
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
+    f = jldopen(obs_fname, "r")
+    obsamp, obsphase = f["obsamp"], f["obsphase"]
+
+    npaths = length(paths)
+
+    # Component columns follow the LMP Fields enum → column mapping
+    hy = LongwaveModePropagator.index(Fields.Hy)
+    hx = LongwaveModePropagator.index(Fields.Hx)
+
+    truth = Dict{Symbol,Vector{Float64}}()
+    if :amp in datatypes
+        truth[:amp] = obsamp[:, hy] .+ MVIA.ZH_DBUVM_TO_B_DBPT  # Z₀Hy dB µV/m → B dB pT
+    end
+    if :phase in datatypes
+        truth[:phase] = obsphase[:, hy]
+    end
+    if :s2 in datatypes || :s3 in datatypes
+        s2s3 = MVIA.polarization_s2s3.(obsamp[:, hy], obsphase[:, hy],
+                                       obsamp[:, hx], obsphase[:, hx])
+        truth[:s2] = getindex.(s2s3, 1)
+        truth[:s3] = getindex.(s2s3, 2)
+    end
+
+    fields = [collect(datatypes); [Symbol(df, "_noiseless") for df in datatypes]]
+    data = KeyedArray(Array{Float64,3}(undef, length(fields), npaths, DATALENGTH);
+        field=fields, path=MVIA.pathname.(paths), t=1:DATALENGTH)
+
+    collect(σobs.path) == MVIA.pathname.(paths) ||
+        error("observations: σobs path axis does not match paths")
+
+    for df in datatypes
+        data(field=Symbol(df, "_noiseless")) .= truth[df]
+        data(field=df) .= truth[df] .+ Array(σobs(field=df)) .* randn(rng, npaths, DATALENGTH)
+    end
+
+    return data
+end
+
 """
 observations(name, σamp, σphase)
 
@@ -219,7 +260,7 @@ This selects and converts data from Z0Hy to By in dB re 1 pT.
 """
 function observations(name, σamp, σphase; paths=buildpaths(), rng=reset_rng())
 
-    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
     f = jldopen(obs_fname, "r")
     obsamp, obsphase = f["obsamp"], f["obsphase"]
 
@@ -245,11 +286,123 @@ From filename "name" read in a JLD2 file of amp and phase measurments and random
 """
 function observations(name)
     
-    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
     f = jldopen(obs_fname, "r")
     data = f["params"].data.contents
 
     return data
+end
+
+bound_sigma(p95, df::Symbol) =
+    df === :amp   ? p95.amp_y_dB          :
+    df === :phase ? deg2rad(p95.pha_y_deg) :
+    df === :s2    ? p95.s2                 :
+    df === :s3    ? p95.s3                 :
+    error("bound_sigma: no per-path σ for observable :$df")
+
+const FRAME_PREFIX = "worst/"
+const FRAME_OBS = (amp="By_amp", phase="By_phase", s2="s2", s3="s3")
+
+function load_frame_sigma(datatypes::Tuple, paths, file)
+    isfile(file) || error("load_frame_sigma: $file not found")
+
+    pathnames = MVIA.pathname.(paths)
+    σ = jldopen(file, "r") do f
+        units, avail, pairkeys = f["units"], f["observables"], f["pairs"]
+
+        for df in datatypes
+            haskey(FRAME_OBS, df) ||
+                error("load_frame_sigma: no observable mapped for :$df")
+            FRAME_OBS[df] in avail ||
+                error("load_frame_sigma: $(FRAME_OBS[df]) not in $(basename(file)); \
+                       file has $avail")
+        end
+        for p in pathnames
+            p in pairkeys || error("load_frame_sigma: no entry for $p in \
+                $(basename(file)); file has $(sort(pairkeys))")
+        end
+
+        [let obs = FRAME_OBS[df],
+             w = abs(f[FRAME_PREFIX * p * "/" * obs].worst)
+            string(units[obs]) == "deg" ? deg2rad(w) : w
+         end for df in datatypes, p in pathnames]
+    end
+
+    return KeyedArray(σ; field=collect(datatypes), path=pathnames)
+end
+
+function construct_R(datatypes, paths; noisefile = "rotated_error_bound.jld2",  framefile  = "avid_worst.jld2")
+    npaths = length(paths)
+
+    ### Construct observation-noise parameters.
+    σamp_model = parse(Float64, get(ENV, "SIGMA_AMP_MODEL", "0.435"))
+    σphase_model = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MODEL", "4.35")))
+    σs2_model = parse(Float64, get(ENV, "SIGMA_S2_MODEL", "0.055"))
+    σs3_model = parse(Float64, get(ENV, "SIGMA_S3_MODEL", "0.065"))
+    σmodel = (amp=σamp_model, phase=σphase_model, s2=σs2_model, s3=σs3_model)
+
+    if parse(Bool, get(ENV, "NOMINAL_NOISE", "true"))
+        σamp_meas = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.126"))
+        σphase_meas = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "0.83")))
+        σs2_meas = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.0124"))
+        σs3_meas = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.0129"))
+        σmeas_nom = (amp=σamp_meas, phase=σphase_meas, s2=σs2_meas, s3=σs3_meas)
+        σmeas = KeyedArray([σmeas_nom[df] for df in datatypes, _ in paths];
+            field=collect(datatypes), path=MVIA.pathname.(paths))
+
+        σamp_frame = parse(Float64, get(ENV, "SIGMA_AMP_FRAME", "0.0427"))
+        σphase_frame = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_FRAME", "0.123")))
+        σs2_frame = parse(Float64, get(ENV, "SIGMA_S2_FRAME", "0.0163"))
+        σs3_frame = parse(Float64, get(ENV, "SIGMA_S3_FRAME", "0.00226"))
+        σframe_nom = (amp=σamp_frame, phase=σphase_frame, s2=σs2_frame, s3=σs3_frame)
+        σframe = KeyedArray([σframe_nom[df] for df in datatypes, _ in paths];
+            field=collect(datatypes), path=MVIA.pathname.(paths))
+
+    else
+        file = joinpath(@__DIR__, "inputs", noisefile)
+        isfile(file) || error("construct_R: $file not found")
+        bound = load(file, "bound")
+
+        boundkeys = map(paths) do p
+            parts = split(MVIA.pathname(p), '-'; limit=2)
+            length(parts) == 2 ||
+                error("construct_R: cannot parse tx/rx from path name $(MVIA.pathname(p))")
+            key = (String(parts[2]), String(parts[1]))
+            haskey(bound, key) || error("construct_R: no entry for $key in $(basename(file)); \
+                file has $(sort(collect(keys(bound))))")
+            key
+        end
+
+        σmeas = KeyedArray([bound_sigma(bound[k].p95, df) for df in datatypes, k in boundkeys];
+            field=collect(datatypes), path=MVIA.pathname.(paths))
+
+        σframe = load_frame_sigma(datatypes, paths, joinpath(@__DIR__, "inputs", framefile))        
+    end
+
+    R_model = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    for df in datatypes
+        R_model(field=df) .= σmodel[df]^2
+    end
+
+    R_frame = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+        field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+        for df in datatypes
+            R_frame(field=df) .= Array(σframe(field=df)).^2
+        end
+
+    R_meas = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    for df in datatypes
+        R_meas(field=df) .= Array(σmeas(field=df)).^2
+    end
+
+    R = R_model + R_meas + R_frame
+
+    σobs = KeyedArray(hypot.(Array(σmeas), Array(σframe));
+    field=collect(datatypes), path=MVIA.pathname.(paths))
+
+    return(R, σmodel, σmeas, σframe, σobs)
 end
 
 function init_params()
@@ -310,23 +463,23 @@ function init_params()
 
     if pathset == "Standard"
         paths = buildpaths()
-        datafile = "Inputs/"*timeofday*"1"
+        datafile = "inputs/"*timeofday*"1"
     elseif pathset == "AVID"
         paths = buildAVIDpaths()
         if epp == "none"
-            datafile = "Inputs/"*timeofday*"1_buildAVIDpaths"
+            datafile = "inputs/"*timeofday*"1_buildAVIDpaths"
         else
-            datafile = "Inputs/"*timeofday*"1_"*epp
+            datafile = "inputs/"*timeofday*"1_"*epp
         end
     elseif pathset == "AVIDPLUS"
         paths = buildAVIDpluspaths()
-        datafile = "Inputs/"*timeofday*"1_buildAVIDpluspaths"
+        datafile = "inputs/"*timeofday*"1_buildAVIDpluspaths"
     elseif pathset == "reducedAVID"
         paths = buildreducedAVIDpaths()
         if epp == "none"
-            datafile = "Inputs/"*timeofday*"1_buildreducedAVIDpaths"
+            datafile = "inputs/"*timeofday*"1_buildreducedAVIDpaths"
         else
-            datafile = "Inputs/"*timeofday*"1_"*epp
+            datafile = "inputs/"*timeofday*"1_"*epp
         end
     else
         error("Unknown Pathset: ", pathset)
@@ -334,48 +487,7 @@ function init_params()
 
     npaths = length(paths)
 
-    ### Construct observation-noise parameters.
-    # SIGMA_S2S3 is a placeholder scalar pending receiver-noise characterization:
-    # with a fixed per-channel noise floor, the physical σ on (s2, s3) is
-    # ≈ σ_channel/|Hy| per path per epoch. That structure enters through the
-    # per-path per-epoch R below, which is currently short-circuited to scalars.
-    σamp_model = parse(Float64, get(ENV, "SIGMA_AMP", "0.435"))
-    σphase_model = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE", "4.35")))
-    σs2_model = parse(Float64, get(ENV, "SIGMA_S2", "0.055"))
-    σs3_model = parse(Float64, get(ENV, "SIGMA_S3", "0.055"))
-    σmodel = (amp=σamp_model, phase=σphase_model, s2=σs2_model, s3=σs3_model)
-
-    R_model = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
-    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
-    for df in datatypes
-        R_model(field=df) .= σmodel[df]^2
-    end
-
-    σamp_meas = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.126"))
-    σphase_meas = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "0.83")))
-    σs2_meas = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.0124"))
-    σs3_meas = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.0129"))
-    σmeas = (amp=σamp_meas, phase=σphase_meas, s2=σs2_meas, s3=σs3_meas)
-
-    R_meas = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
-    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
-    for df in datatypes
-        R_meas(field=df) .= σmeas[df]^2
-    end
-
-    σamp_frame = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.1"))
-    σphase_frame = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "0.46")))
-    σs2_frame = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.05"))
-    σs3_frame = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.004"))
-    σframe = (amp=σamp_frame, phase=σphase_frame, s2=σs2_frame, s3=σs3_frame)
-
-    R_frame = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
-    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
-    for df in datatypes
-        R_meas(field=df) .= σframe[df]^2
-    end
-
-    R = R_model + R_meas + R_frame
+    R, σmodel, σmeas, σframe, σobs = construct_R(datatypes, paths)
 
     ### Create geospatial grid and related parameters
 
@@ -437,7 +549,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
-    timeofday, pathset, dt, epp, paths, datafile, σmodel, σmeas, σframe, R, pathstep, modelsteps, 
+    timeofday, pathset, dt, epp, paths, datafile, σmodel, σmeas, σframe, σobs, R, pathstep, modelsteps, 
     x_grid, y_grid, localization, localization_mask, krig_threshold, itp, σ_h, σ_B, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 
@@ -581,8 +693,14 @@ function name_scenario(scenario, parameters)
         scenario = scenario * "_" * localization_mask[1]
     end
 
-    if modelsteps[1].dr != 300 * 1e3
+    if modelsteps[1].dr != 200 * 1e3
         scenario = scenario*"_$(Int(modelsteps[1].dr /1e3))dr"
+    end
+
+    if parse(Bool, get(ENV, "NOMINAL_NOISE", "true"))
+        scenario = scenario * "_nom_noise"
+    else
+        scenario = scenario * "_char_noise"
     end
 
     @info "Scenario: "*scenario

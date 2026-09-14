@@ -332,36 +332,50 @@ function init_params()
         error("Unknown Pathset: ", pathset)
     end
 
+    npaths = length(paths)
+
     ### Construct observation-noise parameters.
     # SIGMA_S2S3 is a placeholder scalar pending receiver-noise characterization:
     # with a fixed per-channel noise floor, the physical σ on (s2, s3) is
     # ≈ σ_channel/|Hy| per path per epoch. That structure enters through the
     # per-path per-epoch R below, which is currently short-circuited to scalars.
-    σamp = parse(Float64, get(ENV, "SIGMA_AMP", "0.1"))
-    σphase = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE", "1")))
-    σs2 = parse(Float64, get(ENV, "SIGMA_S2", "0.05"))
-    σs3 = parse(Float64, get(ENV, "SIGMA_S3", "0.005"))
-    σobs = (amp=σamp, phase=σphase, s2=σs2, s3=σs3)
+    σamp_model = parse(Float64, get(ENV, "SIGMA_AMP", "0.435"))
+    σphase_model = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE", "4.35")))
+    σs2_model = parse(Float64, get(ENV, "SIGMA_S2", "0.055"))
+    σs3_model = parse(Float64, get(ENV, "SIGMA_S3", "0.055"))
+    σmodel = (amp=σamp_model, phase=σphase_model, s2=σs2_model, s3=σs3_model)
 
-    σamp_meas = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.1"))
-    σphase_meas = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "1")))
-    σs2_meas = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.05"))
-    σs3_meas = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.005"))
+    R_model = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    for df in datatypes
+        R_model(field=df) .= σmodel[df]^2
+    end
+
+    σamp_meas = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.126"))
+    σphase_meas = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "0.83")))
+    σs2_meas = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.0124"))
+    σs3_meas = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.0129"))
     σmeas = (amp=σamp_meas, phase=σphase_meas, s2=σs2_meas, s3=σs3_meas)
 
-    npaths = length(paths)
-
-    ### Per-path, per-epoch observation-error variance.
-    # R carries dims (field × path × t) so that path- and epoch-dependent values
-    # (e.g. SNR-driven variances, null gating) can be assigned without touching
-    # the filter machinery: each iteration consumes MVIA.stack_R(R(t=i), datatypes).
-    # SHORT-CIRCUIT: every path and epoch currently receives the scalar per-field
-    # variance. Replacing the short-circuit means editing only this fill loop.
-    R = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
-        field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    R_meas = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
     for df in datatypes
-        R(field=df) .= σobs[df]^2
+        R_meas(field=df) .= σmeas[df]^2
     end
+
+    σamp_frame = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.1"))
+    σphase_frame = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "0.46")))
+    σs2_frame = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.05"))
+    σs3_frame = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.004"))
+    σframe = (amp=σamp_frame, phase=σphase_frame, s2=σs2_frame, s3=σs3_frame)
+
+    R_frame = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    for df in datatypes
+        R_meas(field=df) .= σframe[df]^2
+    end
+
+    R = R_model + R_meas + R_frame
 
     ### Create geospatial grid and related parameters
 
@@ -423,7 +437,7 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
-    timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, σs2, σs3, σobs, σmeas, R, pathstep, modelsteps, 
+    timeofday, pathset, dt, epp, paths, datafile, σmodel, σmeas, σframe, R, pathstep, modelsteps, 
     x_grid, y_grid, localization, localization_mask, krig_threshold, itp, σ_h, σ_B, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 

@@ -70,6 +70,9 @@ function runletkf(parameters)
         old_y_grid = axiskeys(src, :y)
     
         if old_x_grid == x_grid && old_y_grid == y_grid
+            file_locmask = .!isnan.(vec(parent(src(:h)(ens=1))))
+            file_locmask == anylocal(localization) ||
+                error("Localization mask of xy_file differs from current mask ($(count(file_locmask)) vs $(count(anylocal(localization))) active cells)")
             xy_state(t=0) .= src
             @info "Grids match; directly assigned xy_state from file at iteration $(init_t)"
         else

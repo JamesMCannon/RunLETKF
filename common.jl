@@ -2,6 +2,25 @@ reset_rng() = StableRNG(1234)
 reset_rng(seed) = StableRNG(seed)
 
 """
+    common_simulation()
+
+Return parameters common to all scenarios.
+"""
+function common_simulation()
+    modelproj = MVIA.esri_102010() # from SubionosphericInversionAlgorithms.jl
+
+    # Simulation boundaries
+    west, east = -136.5, -91
+    south, north = 46, 64
+
+    pathstep = 50e3
+    lengthscale = 600e3          # obs2grid_distance radius and variogram range
+    krig_threshold = 0.2^2
+    krig_dr= 20e3
+    return (; modelproj, west, east, south, north, pathstep, lengthscale, krig_threshold, krig_dr)
+end
+
+"""
     buildpaths()
 
 Return a vector of `(Transmitter, Receiver)` propagation paths used in the scenarios.
@@ -492,7 +511,7 @@ function init_params()
     ### Create geospatial grid and related parameters
 
     @unpack west, east, south, north, modelproj,
-        pathstep, lengthscale, krig_threshold = common_simulation()
+        pathstep, lengthscale, krig_threshold, krig_dr = common_simulation()
 
     # Setup Grid
     dr = parse(Float64, get(ENV, "DR_KM", "200")) * 1e3
@@ -508,8 +527,9 @@ function init_params()
     if localization_mask == "RECTANGLE"
         filterbounds!(localization, lola, west, east, south, north)
     elseif localization_mask =="KRIGING"
-        varmap = MVIA.krigingmask(paths, modelproj, x_grid, y_grid; pathstep=pathstep, range=lengthscale)
-        filterbounds!(localization, varmap, krig_threshold)
+        keep = MVIA.krigingkeep(paths, modelproj, x_grid, y_grid, krig_threshold;
+            krig_dr=krig_dr, pathstep=pathstep, range=lengthscale)
+        filterbounds!(localization, keep)
     else
         error("Unknown localization mask: "*localization_mask)
     end
@@ -718,25 +738,6 @@ function rx_offsets1(paths)
     end
     offsets
 end
-
-"""
-    common_simulation()
-
-Return parameters common to all scenarios.
-"""
-function common_simulation()
-    modelproj = MVIA.esri_102010() # from SubionosphericInversionAlgorithms.jl
-
-    # Simulation boundaries
-    west, east = -136.5, -91
-    south, north = 46, 64
-
-    pathstep = 50e3
-    lengthscale = 600e3          # obs2grid_distance radius and variogram range
-    krig_threshold = 0.2^2
-    return (; modelproj, west, east, south, north, pathstep, lengthscale, krig_threshold)
-end
-
 
 function window_start(x::Int, i::Int, w::Int)
     @assert 1 ≤ i ≤ x "Index i out of bounds"

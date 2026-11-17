@@ -2,6 +2,25 @@ reset_rng() = StableRNG(1234)
 reset_rng(seed) = StableRNG(seed)
 
 """
+    common_simulation()
+
+Return parameters common to all scenarios.
+"""
+function common_simulation()
+    modelproj = MVIA.esri_102010() # from SubionosphericInversionAlgorithms.jl
+
+    # Simulation boundaries
+    west, east = -136.5, -91
+    south, north = 46, 64
+
+    pathstep = 50e3
+    lengthscale = 600e3          # obs2grid_distance radius and variogram range
+    krig_threshold = 0.2^2
+    krig_dr= 20e3
+    return (; modelproj, west, east, south, north, pathstep, lengthscale, krig_threshold, krig_dr)
+end
+
+"""
     buildpaths()
 
 Return a vector of `(Transmitter, Receiver)` propagation paths used in the scenarios.
@@ -79,6 +98,31 @@ function buildAVIDpaths()
 end
 
 """
+    buildreducedAVIDpaths()
+
+Return a vector of `(Transmitter, Receiver)` propagation paths from the Array for VLF Imaging of the D-region (AVID). This removes CH, JU, and PRU from the array.
+"""
+function buildreducedAVIDpaths()
+    transmitters = [
+        Transmitter{VerticalDipole}(TRANSMITTER[:NLK].name, TRANSMITTER[:NLK].latitude, TRANSMITTER[:NLK].longitude, TRANSMITTER[:NLK].antenna, TRANSMITTER[:NLK].frequency,240e3),    
+        Transmitter{VerticalDipole}(TRANSMITTER[:NML].name, TRANSMITTER[:NML].latitude, TRANSMITTER[:NML].longitude, TRANSMITTER[:NML].antenna, TRANSMITTER[:NML].frequency, 235e3)
+    ]
+    receivers = [
+        Receiver("WHI", 60.751, -135.101, 0.0, VerticalDipole()),
+        Receiver("RAB", 58.222, -103.680, 0.0, VerticalDipole()),
+        Receiver("FSM", 60.026, -111.931, 0.0, VerticalDipole()),
+        Receiver("CAL", 51.654, -128.133, 0.0, VerticalDipole()),
+        Receiver("FSI", 61.757, -121.229, 0.0, VerticalDipole()),
+        Receiver("PIN", 50.258, -95.865, 0.0, VerticalDipole()),
+        Receiver("ISL", 53.855, -94.660, 0.0, VerticalDipole()),
+        Receiver("GIL", 56.377, -94.644, 0.0, VerticalDipole())
+    ]
+    paths = [(tx, rx) for tx in transmitters for rx in receivers]
+
+    return paths
+end
+
+"""
     buildAVIDpluspaths()
 
 Return a vector of `(Transmitter, Receiver)` propagation paths from AVID including an AARDVARK receiver near Edmonton.
@@ -122,6 +166,112 @@ function sample_values(A::KeyedArray, n::Int; rng=Random.default_rng())
 end
 
 """
+    observations(name, σobs, datatypes; paths=buildpaths(), rng=reset_rng())
+
+Read simulated LMP field-component outputs (`obsamp`, `obsphase`: path × component
+matrices in LMP `Fields` column order, Z₀H amplitudes in dB re 1 µV/m, phases in
+rad) from JLD2 file `name` and construct the noisy observation KeyedArray for the
+requested observable fields in `datatypes` (canonical order (:amp, :phase, :s2, :s3)):
+
+- `:amp`   — Hy amplitude converted to B in dB re 1 pT
+- `:phase` — Hy phase (rad)
+- `:s2`, `:s3` — Cartesian (normalized-Stokes) coordinates of the Hx/Hy ratio via
+  `MVIA.polarization_s2s3` (single source of truth for the sign convention). The
+  Z₀H dB reference cancels in the ratio, so the raw file columns are used directly.
+
+Noise is added independently per observable with the per-field σ from `σobs`
+(a NamedTuple with at least the keys in `datatypes`).
+
+NOTE (deliberate approximation): independent per-observable Gaussian noise is
+the short-circuit consistent with the current scalar diagonal R. Channel-level
+(complex phasor) noise generation — which induces the physically correct
+cross-field error correlations and the SNR-dependent (s2, s3) noise scale — is
+deferred to the R-characterization stage.
+
+For every requested field `f`, a noiseless copy is stored under
+`Symbol(f, "_noiseless")`. The truth is time-constant; each `t` slice is an
+independent noise realization.
+"""
+function observations(name, σobs::NamedTuple, datatypes::Tuple; paths=buildpaths(), rng=reset_rng())
+
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
+    f = jldopen(obs_fname, "r")
+    obsamp, obsphase = f["obsamp"], f["obsphase"]
+
+    npaths = length(paths)
+
+    # Component columns follow the LMP Fields enum → column mapping
+    hy = LongwaveModePropagator.index(Fields.Hy)
+    hx = LongwaveModePropagator.index(Fields.Hx)
+
+    truth = Dict{Symbol,Vector{Float64}}()
+    if :amp in datatypes
+        truth[:amp] = obsamp[:, hy] .+ MVIA.ZH_DBUVM_TO_B_DBPT  # Z₀Hy dB µV/m → B dB pT
+    end
+    if :phase in datatypes
+        truth[:phase] = obsphase[:, hy]
+    end
+    if :s2 in datatypes || :s3 in datatypes
+        s2s3 = MVIA.polarization_s2s3.(obsamp[:, hy], obsphase[:, hy],
+                                       obsamp[:, hx], obsphase[:, hx])
+        truth[:s2] = getindex.(s2s3, 1)
+        truth[:s3] = getindex.(s2s3, 2)
+    end
+
+    fields = [collect(datatypes); [Symbol(df, "_noiseless") for df in datatypes]]
+    data = KeyedArray(Array{Float64,3}(undef, length(fields), npaths, DATALENGTH);
+        field=fields, path=MVIA.pathname.(paths), t=1:DATALENGTH)
+
+    for df in datatypes
+        data(field=Symbol(df, "_noiseless")) .= truth[df]
+        data(field=df) .= truth[df] .+ σobs[df] .* randn(rng, npaths, DATALENGTH)
+    end
+
+    return data
+end
+
+function observations(name, σobs::KeyedArray, datatypes::Tuple; paths=buildpaths(), rng=reset_rng())
+
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
+    f = jldopen(obs_fname, "r")
+    obsamp, obsphase = f["obsamp"], f["obsphase"]
+
+    npaths = length(paths)
+
+    # Component columns follow the LMP Fields enum → column mapping
+    hy = LongwaveModePropagator.index(Fields.Hy)
+    hx = LongwaveModePropagator.index(Fields.Hx)
+
+    truth = Dict{Symbol,Vector{Float64}}()
+    if :amp in datatypes
+        truth[:amp] = obsamp[:, hy] .+ MVIA.ZH_DBUVM_TO_B_DBPT  # Z₀Hy dB µV/m → B dB pT
+    end
+    if :phase in datatypes
+        truth[:phase] = obsphase[:, hy]
+    end
+    if :s2 in datatypes || :s3 in datatypes
+        s2s3 = MVIA.polarization_s2s3.(obsamp[:, hy], obsphase[:, hy],
+                                       obsamp[:, hx], obsphase[:, hx])
+        truth[:s2] = getindex.(s2s3, 1)
+        truth[:s3] = getindex.(s2s3, 2)
+    end
+
+    fields = [collect(datatypes); [Symbol(df, "_noiseless") for df in datatypes]]
+    data = KeyedArray(Array{Float64,3}(undef, length(fields), npaths, DATALENGTH);
+        field=fields, path=MVIA.pathname.(paths), t=1:DATALENGTH)
+
+    collect(σobs.path) == MVIA.pathname.(paths) ||
+        error("observations: σobs path axis does not match paths")
+
+    for df in datatypes
+        data(field=Symbol(df, "_noiseless")) .= truth[df]
+        data(field=df) .= truth[df] .+ Array(σobs(field=df)) .* randn(rng, npaths, DATALENGTH)
+    end
+
+    return data
+end
+
+"""
 observations(name, σamp, σphase)
 
 From filename "name" read in a JLD2 file of amp and phase measurments and randomly add noise from provided σamp, σphase.
@@ -129,7 +279,7 @@ This selects and converts data from Z0Hy to By in dB re 1 pT.
 """
 function observations(name, σamp, σphase; paths=buildpaths(), rng=reset_rng())
 
-    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
     f = jldopen(obs_fname, "r")
     obsamp, obsphase = f["obsamp"], f["obsphase"]
 
@@ -155,11 +305,123 @@ From filename "name" read in a JLD2 file of amp and phase measurments and random
 """
 function observations(name)
     
-    obs_fname = joinpath(@__DIR__, "Inputs", basename(name) * ".jld2")
+    obs_fname = joinpath(@__DIR__, "inputs", basename(name) * ".jld2")
     f = jldopen(obs_fname, "r")
     data = f["params"].data.contents
 
     return data
+end
+
+bound_sigma(p95, df::Symbol) =
+    df === :amp   ? p95.amp_y_dB          :
+    df === :phase ? deg2rad(p95.pha_y_deg) :
+    df === :s2    ? p95.s2                 :
+    df === :s3    ? p95.s3                 :
+    error("bound_sigma: no per-path σ for observable :$df")
+
+const FRAME_PREFIX = "worst/"
+const FRAME_OBS = (amp="By_amp", phase="By_phase", s2="s2", s3="s3")
+
+function load_frame_sigma(datatypes::Tuple, paths, file)
+    isfile(file) || error("load_frame_sigma: $file not found")
+
+    pathnames = MVIA.pathname.(paths)
+    σ = jldopen(file, "r") do f
+        units, avail, pairkeys = f["units"], f["observables"], f["pairs"]
+
+        for df in datatypes
+            haskey(FRAME_OBS, df) ||
+                error("load_frame_sigma: no observable mapped for :$df")
+            FRAME_OBS[df] in avail ||
+                error("load_frame_sigma: $(FRAME_OBS[df]) not in $(basename(file)); \
+                       file has $avail")
+        end
+        for p in pathnames
+            p in pairkeys || error("load_frame_sigma: no entry for $p in \
+                $(basename(file)); file has $(sort(pairkeys))")
+        end
+
+        [let obs = FRAME_OBS[df],
+             w = abs(f[FRAME_PREFIX * p * "/" * obs].worst)
+            string(units[obs]) == "deg" ? deg2rad(w) : w
+         end for df in datatypes, p in pathnames]
+    end
+
+    return KeyedArray(σ; field=collect(datatypes), path=pathnames)
+end
+
+function construct_R(datatypes, paths; noisefile = "rotated_error_bound.jld2",  framefile  = "avid_worst.jld2")
+    npaths = length(paths)
+
+    ### Construct observation-noise parameters.
+    σamp_model = parse(Float64, get(ENV, "SIGMA_AMP_MODEL", "0.435"))
+    σphase_model = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MODEL", "4.35")))
+    σs2_model = parse(Float64, get(ENV, "SIGMA_S2_MODEL", "0.055"))
+    σs3_model = parse(Float64, get(ENV, "SIGMA_S3_MODEL", "0.065"))
+    σmodel = (amp=σamp_model, phase=σphase_model, s2=σs2_model, s3=σs3_model)
+
+    if parse(Bool, get(ENV, "NOMINAL_NOISE", "true"))
+        σamp_meas = parse(Float64, get(ENV, "SIGMA_AMP_MEAS", "0.126"))
+        σphase_meas = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_MEAS", "0.83")))
+        σs2_meas = parse(Float64, get(ENV, "SIGMA_S2_MEAS", "0.0124"))
+        σs3_meas = parse(Float64, get(ENV, "SIGMA_S3_MEAS", "0.0129"))
+        σmeas_nom = (amp=σamp_meas, phase=σphase_meas, s2=σs2_meas, s3=σs3_meas)
+        σmeas = KeyedArray([σmeas_nom[df] for df in datatypes, _ in paths];
+            field=collect(datatypes), path=MVIA.pathname.(paths))
+
+        σamp_frame = parse(Float64, get(ENV, "SIGMA_AMP_FRAME", "0.0427"))
+        σphase_frame = deg2rad(parse(Float64, get(ENV, "SIGMA_PHASE_FRAME", "0.123")))
+        σs2_frame = parse(Float64, get(ENV, "SIGMA_S2_FRAME", "0.0163"))
+        σs3_frame = parse(Float64, get(ENV, "SIGMA_S3_FRAME", "0.00226"))
+        σframe_nom = (amp=σamp_frame, phase=σphase_frame, s2=σs2_frame, s3=σs3_frame)
+        σframe = KeyedArray([σframe_nom[df] for df in datatypes, _ in paths];
+            field=collect(datatypes), path=MVIA.pathname.(paths))
+
+    else
+        file = joinpath(@__DIR__, "inputs", noisefile)
+        isfile(file) || error("construct_R: $file not found")
+        bound = load(file, "bound")
+
+        boundkeys = map(paths) do p
+            parts = split(MVIA.pathname(p), '-'; limit=2)
+            length(parts) == 2 ||
+                error("construct_R: cannot parse tx/rx from path name $(MVIA.pathname(p))")
+            key = (String(parts[2]), String(parts[1]))
+            haskey(bound, key) || error("construct_R: no entry for $key in $(basename(file)); \
+                file has $(sort(collect(keys(bound))))")
+            key
+        end
+
+        σmeas = KeyedArray([bound_sigma(bound[k].p95, df) for df in datatypes, k in boundkeys];
+            field=collect(datatypes), path=MVIA.pathname.(paths))
+
+        σframe = load_frame_sigma(datatypes, paths, joinpath(@__DIR__, "inputs", framefile))        
+    end
+
+    R_model = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    for df in datatypes
+        R_model(field=df) .= σmodel[df]^2
+    end
+
+    R_frame = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+        field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+        for df in datatypes
+            R_frame(field=df) .= Array(σframe(field=df)).^2
+        end
+
+    R_meas = KeyedArray(fill(NaN, length(datatypes), npaths, DATALENGTH);
+    field=collect(datatypes), path=MVIA.pathname.(paths), t=1:DATALENGTH)
+    for df in datatypes
+        R_meas(field=df) .= Array(σmeas(field=df)).^2
+    end
+
+    R = R_model + R_meas + R_frame
+
+    σobs = KeyedArray(hypot.(Array(σmeas), Array(σframe));
+    field=collect(datatypes), path=MVIA.pathname.(paths))
+
+    return(R, σmodel, σmeas, σframe, σobs)
 end
 
 function init_params()
@@ -178,6 +440,12 @@ function init_params()
         statetypes = (statetypes..., :xy)
     end
 
+    ### Observable selection knobs.
+    # Canonical order (:amp, :phase, :s2, :s3) fixes the stacked observation-vector
+    # layout [field₁(paths); field₂(paths); ...] shared by data, R, and the LETKF
+    # updates (see MVIA.fieldrange). :amp/:phase are the absolute Hy observables;
+    # :s2/:s3 are the Cartesian coordinates of the Hx/Hy ratio, invariant to TX
+    # power and to trellis phase offsets common to the two loop channels.
     datatypes = ()
     if parse(Bool, get(ENV, "DO_AMP", "true")) 
         datatypes = (datatypes..., :amp)
@@ -185,6 +453,14 @@ function init_params()
     if parse(Bool, get(ENV, "DO_PHASE", "true"))
         datatypes = (datatypes..., :phase)
     end
+    if parse(Bool, get(ENV, "DO_S2", "false"))
+        datatypes = (datatypes..., :s2)
+    end
+    if parse(Bool, get(ENV, "DO_S3", "false"))
+        datatypes = (datatypes..., :s3)
+    end
+    isempty(datatypes) &&
+        error("No observable types selected: at least one of DO_AMP, DO_PHASE, DO_S2, DO_S3 must be true")
 
     ### Determine which data file to use based on time of day and exact array configuration.
     timeofday = get(ENV,"TOD","day")
@@ -192,11 +468,11 @@ function init_params()
 
     if timeofday == "day" && pathset == "Standard"
         dt = DateTime(2020, 3, 1, 20, 00) #using Dates
-    elseif timeofday == "day" && (pathset == "AVID" || pathset == "AVIDPLUS")
+    elseif timeofday == "day" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
         dt = DateTime(2025, 6, 1, 19, 00)
-    elseif timeofday == "morning" && (pathset == "AVID" || pathset == "AVIDPLUS")
+    elseif timeofday == "morning" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
         dt = DateTime(2025, 6, 1, 13, 00)
-    elseif timeofday == "night" && (pathset == "AVID" || pathset == "AVIDPLUS")
+    elseif timeofday == "night" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
         dt = DateTime(2025, 6, 2, 7)
     else
         error("Unknown time and pathset combination: ", timeofday, " ", pathset)
@@ -206,42 +482,39 @@ function init_params()
 
     if pathset == "Standard"
         paths = buildpaths()
-        datafile = "Inputs/"*timeofday*"1"
+        datafile = "inputs/"*timeofday*"1"
     elseif pathset == "AVID"
         paths = buildAVIDpaths()
         if epp == "none"
-            datafile = "Inputs/"*timeofday*"1_buildAVIDpaths"
+            datafile = "inputs/"*timeofday*"1_buildAVIDpaths"
         else
-            datafile = "Inputs/"*timeofday*"1_"*epp
+            datafile = "inputs/"*timeofday*"1_"*epp
         end
     elseif pathset == "AVIDPLUS"
         paths = buildAVIDpluspaths()
-        datafile = "Inputs/"*timeofday*"1_buildAVIDpluspaths"
+        datafile = "inputs/"*timeofday*"1_buildAVIDpluspaths"
+    elseif pathset == "reducedAVID"
+        paths = buildreducedAVIDpaths()
+        if epp == "none"
+            datafile = "inputs/"*timeofday*"1_buildreducedAVIDpaths"
+        else
+            datafile = "inputs/"*timeofday*"1_"*epp
+        end
     else
         error("Unknown Pathset: ", pathset)
     end
 
-    ### Construct observations data structure, and related parameters.
-    σamp, σphase = 0.1, deg2rad(1.0)
-
     npaths = length(paths)
 
-    R = Float64[]
-    if :amp in datatypes
-        R = [R; fill(σamp^2, npaths)]
-    end
-    if :phase in datatypes
-        R = [R; fill(σphase^2, npaths)]
-    end
+    R, σmodel, σmeas, σframe, σobs = construct_R(datatypes, paths)
 
     ### Create geospatial grid and related parameters
-    pathstep = 50e3 # defined in WGS84
 
-    @unpack west, east, south, north, modelproj = common_simulation()
+    @unpack west, east, south, north, modelproj,
+        pathstep, lengthscale, krig_threshold, krig_dr = common_simulation()
 
     # Setup Grid
     dr = parse(Float64, get(ENV, "DR_KM", "200")) * 1e3
-    lengthscale = 600e3
     modelsteps = ((;dr, lengthscale),)
 
     x_grid, y_grid = MVIA.build_xygrid(west, east, south, north, MVIA.wgs84(), modelproj; dr) #build_xygrid() & wgs84() defined in MVIA
@@ -249,13 +522,14 @@ function init_params()
     trans = Proj.Transformation(modelproj, MVIA.wgs84())
     lola = trans.(parent(parent(MVIA.densify(x_grid, y_grid))))
 
-    localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale)
+    localization = MVIA.obs2grid_distance(lola, paths; r=lengthscale, pathstep=pathstep)
     localization_mask = get(ENV, "LOCALIZATION_MASK", "KRIGING")
     if localization_mask == "RECTANGLE"
         filterbounds!(localization, lola, west, east, south, north)
     elseif localization_mask =="KRIGING"
-        varmap = MVIA.krigingmask(paths, modelproj, x_grid, y_grid; pathstep=pathstep)
-        filterbounds!(localization, varmap, 0.2^2)
+        keep = MVIA.krigingkeep(paths, modelproj, x_grid, y_grid, krig_threshold;
+            krig_dr=krig_dr, pathstep=pathstep, range=lengthscale)
+        filterbounds!(localization, keep)
     else
         error("Unknown localization mask: "*localization_mask)
     end
@@ -266,8 +540,10 @@ function init_params()
 
     ### Build the initial background ensemble parameters. NOTE: for best results, ensure LMPTools.ferguson() has been updated to add 0.15 to Beta. 
     ncells = length(lola)
-    hB = fill(2,ncells) # σ_h′
-    bB = fill(0.04, ncells) # σ_β
+    σ_h = parse(Float64, get(ENV, "SIGMA_H", "2"))
+    σ_B = parse(Float64, get(ENV, "SIGMA_B", "0.04"))
+    hB = fill(σ_h, ncells) # σ_h′
+    bB = fill(σ_B, ncells) # σ_β
 
     h_off = parse(Float64, get(ENV, "H_OFF", "0"))
     b_off = parse(Float64, get(ENV, "B_OFF", "0"))
@@ -293,8 +569,8 @@ function init_params()
     @assert length(h0) == length(hB) == ncells
 
     return(;new_folder, ens_size, ntimes, shuffle_xy, ρ, xy_file, rng, statetypes, datatypes, 
-    timeofday, pathset, dt, epp, paths, datafile, σamp, σphase, R, pathstep, modelsteps, 
-    x_grid, y_grid, localization, localization_mask, itp, hB, bB, h_off, b_off, estimator_name, h0, b0)
+    timeofday, pathset, dt, epp, paths, datafile, σmodel, σmeas, σframe, σobs, R, pathstep, modelsteps, 
+    x_grid, y_grid, localization, localization_mask, krig_threshold, itp, σ_h, σ_B, hB, bB, h_off, b_off, estimator_name, h0, b0)
 end
 
 function init_rx_params(p)
@@ -327,7 +603,7 @@ function init_tx_params(p)
     shuffle_tx = parse(Bool, get(ENV, "SHUFFLE_TX", "false"))
 
     NLKb = parse(Float64, get(ENV, "NLKB","250")) * 1000
-    NMLb = parse(Float64, get(ENV, "NLKB","233")) * 1000
+    NMLb = parse(Float64, get(ENV, "NMLB","233")) * 1000
 
     σTX = parse(Float64, get(ENV, "STDDEV_TX_KW", "50")) * 1000 #convert to watts
     σNLK, σNML = σTX, σTX
@@ -350,7 +626,8 @@ end
 
 function name_scenario(scenario, parameters)
     @unpack ntimes, ens_size, ρ, statetypes, datatypes, xy_file, new_folder, 
-    timeofday, pathset, modelsteps, localization_mask,  h_off, b_off, estimator_name = parameters()
+        timeofday, pathset, modelsteps, localization_mask, krig_threshold, 
+        σ_h, σ_B, h_off, b_off, estimator_name = parameters()
     scenario = scenario * "$(ntimes)itr_$(ens_size)ens_$(ρ)_$(estimator_name)"
 
     if h_off !=0
@@ -359,6 +636,14 @@ function name_scenario(scenario, parameters)
     if b_off !=0
         intb_off = Int(b_off*100)
         scenario = scenario * "_b$(intb_off)"
+    end
+
+    if σ_h !=2
+        scenario = scenario * "_sigh$(σ_h)"
+    end
+    if σ_B !=0.04
+        intσ_B = Int(σ_B*100)
+        scenario = scenario * "_sigb$(intσ_B)"
     end
 
     shuffle_check = false
@@ -392,12 +677,14 @@ function name_scenario(scenario, parameters)
         scenario = scenario * "_shuffle"
     end
 
-    if !(:amp in datatypes && :phase in datatypes)
-        if :amp in datatypes
-            scenario = scenario* "_amp_only"
-        elseif :phase in datatypes
-            scenario = scenario * "_phase_only"
-        end 
+    # Observable-set tag. Legacy names are preserved for the single-field Hy cases;
+    # any other non-default combination is tagged with the full datatypes list.
+    if datatypes == (:amp,)
+        scenario = scenario * "_amp_only"
+    elseif datatypes == (:phase,)
+        scenario = scenario * "_phase_only"
+    elseif datatypes != (:amp, :phase)
+        scenario = scenario * "_" * join(String.(datatypes), "_")
     end
 
     if :tx in statetypes || :rx in statetypes
@@ -420,10 +707,20 @@ function name_scenario(scenario, parameters)
 
     scenario = scenario * "_" * timeofday*"1"*pathset
 
-    scenario = scenario * "_" * localization_mask[1]
+    if localization_mask == "KRIGING"
+        scenario = scenario * "_K$(round(Int, 100*sqrt(krig_threshold)))"
+    else
+        scenario = scenario * "_" * localization_mask[1]
+    end
 
-    if modelsteps[1].dr != 300 * 1e3
+    if modelsteps[1].dr != 200 * 1e3
         scenario = scenario*"_$(Int(modelsteps[1].dr /1e3))dr"
+    end
+
+    if parse(Bool, get(ENV, "NOMINAL_NOISE", "true"))
+        scenario = scenario * "_nom_noise"
+    else
+        scenario = scenario * "_char_noise"
     end
 
     @info "Scenario: "*scenario
@@ -441,22 +738,6 @@ function rx_offsets1(paths)
     end
     offsets
 end
-
-"""
-    common_simulation()
-
-Return parameters common to all scenarios.
-"""
-function common_simulation()
-    modelproj = MVIA.esri_102010() # from SubionosphericInversionAlgorithms.jl
-
-    # Simulation boundaries
-    west, east = -136.5, -91
-    south, north = 46, 64
-
-    return (;modelproj, west, east, south, north)
-end
-
 
 function window_start(x::Int, i::Int, w::Int)
     @assert 1 ≤ i ≤ x "Index i out of bounds"

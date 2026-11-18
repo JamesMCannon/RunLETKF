@@ -475,11 +475,11 @@ function init_params()
 
     if timeofday == "day" && pathset == "Standard"
         dt = DateTime(2020, 3, 1, 20, 00) #using Dates
-    elseif timeofday == "day" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
+    elseif timeofday == "day" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID" || pathset == "minimum")
         dt = DateTime(2025, 6, 1, 19, 00)
-    elseif timeofday == "morning" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
+    elseif timeofday == "morning" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID" || pathset == "minimum")
         dt = DateTime(2025, 6, 1, 13, 00)
-    elseif timeofday == "night" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID")
+    elseif timeofday == "night" && (pathset == "AVID" || pathset == "AVIDPLUS" || pathset == "reducedAVID" || pathset == "minimum")
         dt = DateTime(2025, 6, 2, 7)
     else
         error("Unknown time and pathset combination: ", timeofday, " ", pathset)

@@ -1459,7 +1459,7 @@ version = "1.2.0"
 
 [[deps.LongwaveModePropagator]]
 deps = ["Dates", "DiffEqCallbacks", "EnumX", "FunctionWrappers", "Interpolations", "JSON", "LinearAlgebra", "ModifiedHankelFunctionsOfOrderOneThird", "OrdinaryDiffEq", "Parameters", "PolynomialRoots", "ProgressLogging", "Romberg", "RootsAndPoles", "StaticArrays"]
-git-tree-sha1 = "160006870623c34d58ad7ca0911761ff9499a0d2"
+git-tree-sha1 = "352b5da071539ffe1793650969e7f2ec7665ed75"
 repo-rev = "main"
 repo-url = "https://github.com/fgasdia/LongwaveModePropagator.jl"
 uuid = "38c6559a-e0a7-48c6-827d-3f02e2d19cec"
@@ -1598,7 +1598,7 @@ version = "1.1.3"
 
 [[deps.ModifiedVLFInversionAlgorithms]]
 deps = ["AxisKeys", "Dates", "Distributions", "GeoStats", "GeoTables", "GeographicLib", "ImageFiltering", "Interpolations", "IntervalSets", "LMPTools", "LibGEOS", "LinearAlgebra", "LongwaveModePropagator", "NLopt", "NonlinearSolve", "ProgressMeter", "Proj", "Random", "ScatteredInterpolation", "StaticArrays", "StaticArraysCore", "Statistics", "StatsBase", "TableTransforms", "UnPack"]
-git-tree-sha1 = "7095b338cb6844b968b1ab074ef978dfccb61bdc"
+git-tree-sha1 = "3bcf906f17d47239da70d0b5945358928e12b7ae"
 repo-rev = "LMP_RaP_Update"
 repo-url = "https://github.com/JamesMCannon/ModifiedVLFInversionAlgorithms.jl"
 uuid = "325dd450-e17c-4c65-9110-778031d3fbdc"

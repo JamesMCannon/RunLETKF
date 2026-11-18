@@ -45,4 +45,4 @@ run_letkf A 40
 run_letkf B 40
 run_letkf C 8
 
-"$JULIA" --project="$PROJ" g0_compare.jl g0/A g0/B g0/C
+"$JULIA" --project="$PROJ" optimize/g0_compare.jl g0/A g0/B g0/C

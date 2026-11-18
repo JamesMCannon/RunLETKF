@@ -1,12 +1,12 @@
 using Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(joinpath(@__DIR__, ".."))
 using JLD2, AxisKeys
 
 raw(a) = collect(AxisKeys.keyless_unname(a))
 filled(ym) = ym[:, :, :, 1:end-1]
 
 function load_run(dir)
-    res = joinpath(@__DIR__, dir, "results")
+    res = joinpath(@__DIR__, "..", dir, "results")
     sub = only(readdir(res; join=true))
     file = only(filter(f -> endswith(f, ".jld2") && !startswith(basename(f), "rx_offsets"),
         readdir(sub; join=true)))

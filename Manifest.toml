@@ -1598,8 +1598,8 @@ version = "1.1.3"
 
 [[deps.ModifiedVLFInversionAlgorithms]]
 deps = ["AxisKeys", "Dates", "Distributions", "GeoStats", "GeoTables", "GeographicLib", "ImageFiltering", "Interpolations", "IntervalSets", "LMPTools", "LibGEOS", "LinearAlgebra", "LongwaveModePropagator", "NLopt", "NonlinearSolve", "ProgressMeter", "Proj", "Random", "ScatteredInterpolation", "StaticArrays", "StaticArraysCore", "Statistics", "StatsBase", "TableTransforms", "UnPack"]
-git-tree-sha1 = "3bcf906f17d47239da70d0b5945358928e12b7ae"
-repo-rev = "LMP_RaP_Update"
+git-tree-sha1 = "669a7205daa45fe76200d312a30c27978a693c56"
+repo-rev = "gc-optimization"
 repo-url = "https://github.com/JamesMCannon/ModifiedVLFInversionAlgorithms.jl"
 uuid = "325dd450-e17c-4c65-9110-778031d3fbdc"
 version = "0.1.1"

@@ -123,6 +123,13 @@ function buildreducedAVIDpaths()
 end
 
 """
+    buildminimumpaths()
+
+NLK-CAL and NML-PIN, the shortest AVID path from each transmitter, for smoke tests.
+"""
+buildminimumpaths() = filter(p -> MVIA.pathname(p) in ("NLK-CAL", "NML-PIN"), buildAVIDpaths())
+
+"""
     buildAVIDpluspaths()
 
 Return a vector of `(Transmitter, Receiver)` propagation paths from AVID including an AARDVARK receiver near Edmonton.
@@ -500,6 +507,9 @@ function init_params()
         else
             datafile = "inputs/"*timeofday*"1_"*epp
         end
+    elseif pathset == "minimum"
+        paths = buildminimumpaths()
+        datafile = "inputs/"*timeofday*"1_buildminimumpaths"
     else
         error("Unknown Pathset: ", pathset)
     end

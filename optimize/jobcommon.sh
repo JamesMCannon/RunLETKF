@@ -23,8 +23,30 @@ echo "== precompile, start $(date -Is)"
 "$JULIA" --project="$PROJ" -e 'using Pkg; Pkg.precompile()'
 echo "== precompile end $(date -Is)"
 
-jl() {  # label, threads, script; H_*/S_*/A_* set by caller
-    echo "== $1, $2 threads, start $(date -Is)"
-    JULIA_NUM_THREADS=$2 srun --export=ALL --mpi=none "$JULIA" --project="$PROJ" "$3"
+jl() {  # label, threads, script; H_*/S_*/A_* and JFLAGS set by caller
+    echo "== $1, $2 threads, flags '${JFLAGS:-}', start $(date -Is)"
+    JULIA_NUM_THREADS=$2 srun --export=ALL --mpi=none "$JULIA" --project="$PROJ" ${JFLAGS:-} "$3"
     echo "== $1 end $(date -Is)"
+}
+
+layout() {  # outdir, procs, threads per proc, members per proc, lead s; H_NUMTASKS/JFLAGS set by caller
+    local out=$1 procs=$2 thr=$3 per=$4 lead=$5 i pid failed=0
+    local start=$(( $(date +%s) + lead ))
+    local pids=()
+    echo "== $out: $procs x $thr threads, $per members each, flags '${JFLAGS:-}', numtasks ${H_NUMTASKS:-default}, timed start $(date -d @$start -Is)"
+    for ((i = 0; i < procs; i++)); do
+        H_FIRST=$((1 + i*per)) H_MEMBERS=$per H_CALLS=1 H_START_AT=$start H_OUT=$out/p$(printf %02d $i) \
+            JULIA_NUM_THREADS=$thr "$JULIA" --project="$PROJ" ${JFLAGS:-} optimize/harness.jl \
+            > "$LOGDIR/${SLURM_JOB_ID}_$(basename $out)_p$(printf %02d $i).log" 2>&1 &
+        pids+=($!)
+    done
+    for pid in "${pids[@]}"; do
+        wait "$pid" || { echo "process $pid failed"; failed=1; }
+    done
+    for f in "$LOGDIR/${SLURM_JOB_ID}_$(basename $out)"_p*.log; do
+        echo "-- $(basename "$f")"
+        grep -E "^call |barrier|ERROR|Error" "$f" || true
+    done
+    echo "== $out end $(date -Is)"
+    return $failed
 }

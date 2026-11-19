@@ -4,23 +4,27 @@ harness_config() = (;
     mode    = get(ENV, "H_MODE", "bench"),         # bench | fidelity
     state   = get(ENV, "H_STATE", "g1/state_t1"),
     t       = parse(Int, get(ENV, "H_T", "1")),
+    first   = parse(Int, get(ENV, "H_FIRST", "1")),
     members = parse(Int, get(ENV, "H_MEMBERS", "40")),
     pathset = get(ENV, "H_PATHSET", "bench4"),
     calls   = parse(Int, get(ENV, "H_CALLS", "3")),
     out     = get(ENV, "H_OUT", "g1/run"),
-    gclog   = parse(Bool, get(ENV, "H_GCLOG", "false")))
+    gclog   = parse(Bool, get(ENV, "H_GCLOG", "false")),
+    numtasks = parse(Int, get(ENV, "H_NUMTASKS", "0")),     # 0: lmpparams() default
+    start_at = parse(Float64, get(ENV, "H_START_AT", "0")))  # epoch s; 0: no barrier
 
 """
-    timed_forward(p, paths, rows, lk, t0) → f
+    timed_forward(p, paths, rows, lk, t0, params) → f
 
 `f(z)` is the LETKF forward model for one member; each call appends
 `(thread, start, stop)` (s since `t0[]`) to `rows`.
 """
-function timed_forward(p, paths, rows, lk, t0)
+function timed_forward(p, paths, rows, lk, t0, params)
     return function (z)
         tid = threadid()
         a = time_ns()
-        r = model_observables(p.itp, z.xy_state, paths, p.dt; pathstep=p.pathstep, datatypes=p.datatypes)
+        r = model_observables(p.itp, z.xy_state, paths, p.dt; pathstep=p.pathstep, datatypes=p.datatypes,
+            params)
         b = time_ns()
         lock(lk) do
             push!(rows, (; thread=tid, start=(a - t0[])/1e9, stop=(b - t0[])/1e9))
@@ -67,7 +71,8 @@ function main()
     outdir = joinpath(ROOT, c.out)
     isdir(outdir) && error("$outdir exists; refusing to overwrite")
     c.gclog && GC.enable_logging(true)
-    prov = provenance()
+    prm = finderparams(c.numtasks)
+    prov = (; provenance()..., numtasks=prm.finderparams.numtasks)
     @info "harness" c prov
 
     p = init_params()
@@ -75,28 +80,41 @@ function main()
     xy = saved["state"].xy_state
     (axiskeys(xy, :x) == p.x_grid && axiskeys(xy, :y) == p.y_grid) ||
         error("state grid in $file differs from init_params grid")
-    c.members ≤ length(axiskeys(xy, :ens)) || error("state has fewer than $(c.members) members")
+    members = c.first:(c.first + c.members - 1)
+    last(members) ≤ length(axiskeys(xy, :ens)) || error("state has fewer than $(last(members)) members")
 
-    x = (; xy_state = xy(t=c.t)[ens=1:c.members])
+    x = (; xy_state = xy(t=c.t)[ens=members])
     paths = selectpaths(p.paths, c.pathset)
     rows = NamedTuple{(:thread, :start, :stop), Tuple{Int,Float64,Float64}}[]
     lk = ReentrantLock()
     t0 = Ref(time_ns())
 
     wpaths = selectpaths(p.paths, "warm")
-    fw = timed_forward(p, wpaths, rows, lk, t0)
-    tw = @elapsed ensemble_model!(newym(p.datatypes, wpaths, 1), fw, (; xy_state = x.xy_state[ens=1:1]))
+    fw = timed_forward(p, wpaths, rows, lk, t0, prm)
+    xw = (; xy_state = x.xy_state[ens=1:1])
+    tw = @elapsed ensemble_model!(newym(p.datatypes, wpaths, axiskeys(xw.xy_state, :ens)), fw, xw)
     @printf("warm-up (1 member, NML-PIN): %.1f s\n", tw)
 
-    f = timed_forward(p, paths, rows, lk, t0)
+    if c.start_at > 0
+        wait_s = c.start_at - time()
+        if wait_s > 0
+            sleep(wait_s)
+        else
+            @warn "start barrier missed" late_s = -wait_s
+        end
+    end
+
+    f = timed_forward(p, paths, rows, lk, t0, prm)
     results, timelines, yms = NamedTuple[], Vector{eltype(rows)}[], KeyedArray[]
     for k in 1:c.calls
-        ym = newym(p.datatypes, paths, c.members)
+        ym = newym(p.datatypes, paths, members)
         empty!(rows)
         t0[] = time_ns()
+        ta = time()
         m = measure(() -> ensemble_model!(ym, f, x); mark=c.gclog ? "call $k" : "")
+        tb = time()
         summarize(k, m, rows)
-        push!(results, (; k, m.wall, m.gctime, m.bytes, m.pauses, m.full, m.maxrss))
+        push!(results, (; k, m.wall, m.gctime, m.bytes, m.pauses, m.full, m.maxrss, t_start=ta, t_end=tb))
         push!(timelines, copy(rows))
         push!(yms, ym)
     end
@@ -107,7 +125,7 @@ function main()
 
     mkpath(outdir)
     jldsave(joinpath(outdir, "harness.jld2"); config=c, provenance=prov, statefile=file,
-        paths=MVIA.pathname.(paths), warmup=tw, results, timelines, ym=yms[1], same, fidelity=fid)
+        paths=MVIA.pathname.(paths), members, warmup=tw, results, timelines, ym=yms[1], same, fidelity=fid)
     @info "saved" joinpath(outdir, "harness.jld2")
 end
 

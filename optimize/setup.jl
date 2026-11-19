@@ -27,8 +27,8 @@ raw(a) = collect(AxisKeys.keyless_unname(a))
 
 selectpaths(paths, set) = set == "all" ? paths : filter(p -> MVIA.pathname(p) in PATHSETS[set], paths)
 
-newym(datatypes, paths, n) = KeyedArray(fill(NaN, length(datatypes), length(paths), n);
-    field=collect(datatypes), path=MVIA.pathname.(paths), ens=1:n)
+newym(datatypes, paths, ens) = KeyedArray(fill(NaN, length(datatypes), length(paths), length(ens));
+    field=collect(datatypes), path=MVIA.pathname.(paths), ens=collect(ens))
 
 function load_state(dir)
     res = joinpath(ROOT, dir, "results")
@@ -55,11 +55,24 @@ function measure(f; mark="")
         maxrss=Sys.maxrss(), value=t.value)
 end
 
+"""
+    finderparams(numtasks) → LMPParams
+
+`lmpparams()` with `numtasks` replaced; `numtasks ≤ 0` returns `lmpparams()` unchanged.
+"""
+function finderparams(numtasks)
+    p = lmpparams()
+    numtasks ≤ 0 && return p
+    f = p.finderparams
+    return LMPParams(p; finderparams=FinderParams(; tol=f.tol, maxiters=f.maxiters,
+        maxadaptivenodes=f.maxadaptivenodes, maxnodes=f.maxnodes, numtasks))
+end
+
 function provenance()
     jo = Base.JLOptions()
     return (; commit=readchomp(`git -C $ROOT rev-parse HEAD`),
         dirty=!isempty(readchomp(`git -C $ROOT status --porcelain`)),
         host=gethostname(), nthreads=nthreads(), ngcthreads=Threads.ngcthreads(),
         heap_size_hint=hasfield(typeof(jo), :heap_size_hint) ? Int(jo.heap_size_hint) : -1,
-        numtasks=lmpparams().finderparams.numtasks, julia=string(VERSION), started=now())
+        julia=string(VERSION), started=now())
 end

@@ -1,26 +1,4 @@
-using Pkg
-Pkg.activate(joinpath(@__DIR__, ".."))
-
-using JLD2, Dates, Printf, Statistics
-using LongwaveModePropagator
-using AxisKeys, StableRNGs, Parameters, Random
-using ScatteredInterpolation, Proj
-using LinearAlgebra, Distributions, StatsBase
-using Base.Threads, ProgressMeter
-using LMPTools, WaitProfileEstimators
-using ModifiedVLFInversionAlgorithms
-
-const MVIA = ModifiedVLFInversionAlgorithms
-const SI = ScatteredInterpolation
-const ROOT = normpath(joinpath(@__DIR__, ".."))
-const DATALENGTH = 10  # as in Main.jl; construct_R sizes R with it
-
-include(joinpath(ROOT, "common.jl"))
-
-const PATHSETS = Dict(
-    "warm"   => ("NML-PIN",),
-    "bench4" => ("NML-PIN", "NLK-FSM", "NLK-GIL", "NML-WHI"),
-    "bench2" => ("NLK-WHI", "NML-FSM"))
+include(joinpath(@__DIR__, "setup.jl"))
 
 harness_config() = (;
     mode    = get(ENV, "H_MODE", "bench"),         # bench | fidelity
@@ -31,30 +9,6 @@ harness_config() = (;
     calls   = parse(Int, get(ENV, "H_CALLS", "3")),
     out     = get(ENV, "H_OUT", "g1/run"),
     gclog   = parse(Bool, get(ENV, "H_GCLOG", "false")))
-
-raw(a) = collect(AxisKeys.keyless_unname(a))
-
-selectpaths(paths, set) = set == "all" ? paths : filter(p -> MVIA.pathname(p) in PATHSETS[set], paths)
-
-newym(datatypes, paths, n) = KeyedArray(fill(NaN, length(datatypes), length(paths), n);
-    field=collect(datatypes), path=MVIA.pathname.(paths), ens=1:n)
-
-function load_state(dir)
-    res = joinpath(ROOT, dir, "results")
-    sub = only(readdir(res; join=true))
-    file = only(filter(f -> endswith(f, ".jld2") && !startswith(basename(f), "rx_offsets"),
-        readdir(sub; join=true)))
-    return load(file), file
-end
-
-function measure(f)
-    GC.gc()
-    g0 = Base.gc_num()
-    t = @timed f()
-    d = Base.GC_Diff(Base.gc_num(), g0)
-    return (; wall=t.time, gctime=t.gctime, bytes=t.bytes, pauses=d.pause, full=d.full_sweep,
-        maxrss=Sys.maxrss(), value=t.value)
-end
 
 """
     timed_forward(p, paths, rows, lk, t0) → f
@@ -73,15 +27,6 @@ function timed_forward(p, paths, rows, lk, t0)
         end
         return r
     end
-end
-
-function provenance()
-    jo = Base.JLOptions()
-    return (; commit=readchomp(`git -C $ROOT rev-parse HEAD`),
-        dirty=!isempty(readchomp(`git -C $ROOT status --porcelain`)),
-        host=gethostname(), nthreads=nthreads(), ngcthreads=Threads.ngcthreads(),
-        heap_size_hint=hasfield(typeof(jo), :heap_size_hint) ? Int(jo.heap_size_hint) : -1,
-        numtasks=lmpparams().finderparams.numtasks, julia=string(VERSION), started=now())
 end
 
 function summarize(k, m, rows)
@@ -149,7 +94,7 @@ function main()
         ym = newym(p.datatypes, paths, c.members)
         empty!(rows)
         t0[] = time_ns()
-        m = measure(() -> ensemble_model!(ym, f, x))
+        m = measure(() -> ensemble_model!(ym, f, x); mark=c.gclog ? "call $k" : "")
         summarize(k, m, rows)
         push!(results, (; k, m.wall, m.gctime, m.bytes, m.pauses, m.full, m.maxrss))
         push!(timelines, copy(rows))

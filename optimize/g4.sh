@@ -12,7 +12,7 @@
 # G4 replicate <rep 1-3>: MVIA's multi-process ensemble_model! (4x10, 8x5) against threads only
 # (1x40), 100 members, polished SafeMesh, one node. ym must equal P1's polished ym (p1/M100).
 set -euo pipefail
-REP=${1:?usage: g4.sh <replicate 1-3>}
+REP=${1:-${SLURM_ARRAY_TASK_ID:?usage: g4.sh <replicate 1-3>, or run as an array task}}
 source /projects/jaca8590/Julia/Optimize_LETKF/RunLETKF/optimize/jobcommon.sh
 
 case $REP in

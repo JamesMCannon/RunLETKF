@@ -226,7 +226,8 @@ function runletkf(parameters)
         forward_model = (z -> model_observables(itp, z.xy_state, paths, dt; pathstep, datatypes))
     end
 
-    H!(x, t) = ensemble_model!(ym(t=t), forward_model, x)
+    pids = nprocs() > 1 ? workers() : nothing
+    H!(x, t) = ensemble_model!(ym(t=t), forward_model, x; pids)
 
     # Defaults for the unified call to LETKF_measupdate; these are ignored if :rx or :tx aren't in statetypes
     rx_commit_threshold = (:rx in statetypes) ?

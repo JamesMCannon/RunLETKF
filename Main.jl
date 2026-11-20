@@ -17,6 +17,15 @@ using LMPTools, WaitProfileEstimators
 
 using ModifiedVLFInversionAlgorithms #remember to run ] up ModifiedVLFInversionAlgorithms to pull any changes to the branch
 
+using Distributed
+
+# DISTRIBUTED=true: NPROCS workers (default 4), PROC_THREADS threads each (default 10), PROC_FLAGS extra Julia flags
+if parse(Bool, get(ENV, "DISTRIBUTED", "false"))
+    addprocs(parse(Int, get(ENV, "NPROCS", "4"));
+        exeflags=`--project=$(@__DIR__) --threads=$(get(ENV, "PROC_THREADS", "10")) $(split(get(ENV, "PROC_FLAGS", "")))`)
+    @everywhere using ModifiedVLFInversionAlgorithms, AxisKeys, StatsBase
+end
+
 const MVIA = ModifiedVLFInversionAlgorithms
 const SI = ScatteredInterpolation
 # Often functions are called by MVIA.foo() for transparency, even when those same functions are 

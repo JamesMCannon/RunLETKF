@@ -28,7 +28,7 @@ function main()
     segments = [length(MVIA.pathpts(tx, rx; dist=p.pathstep)[2]) for (tx, rx) in paths]
     memberof = Dict(hash(raw(x.xy_state(ens=e))) => e for e in axiskeys(x.xy_state, :ens))
     length(memberof) == n || error("member states are not distinct")
-    mesh = PolishMesh(SAFEMESH)
+    mesh = PolishMesh(SafeMesh())
 
     wpaths = selectpaths(p.paths, "warm")
     xw = (; xy_state = x.xy_state[ens=1:1])

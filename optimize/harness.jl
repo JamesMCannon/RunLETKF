@@ -1,4 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
+using Distributed
 
 harness_config() = (;
     mode    = get(ENV, "H_MODE", "bench"),         # bench | fidelity
@@ -11,7 +12,10 @@ harness_config() = (;
     out     = get(ENV, "H_OUT", "g1/run"),
     gclog   = parse(Bool, get(ENV, "H_GCLOG", "false")),
     numtasks = parse(Int, get(ENV, "H_NUMTASKS", "0")),     # 0: lmpparams() default
-    start_at = parse(Float64, get(ENV, "H_START_AT", "0")))  # epoch s; 0: no barrier
+    start_at = parse(Float64, get(ENV, "H_START_AT", "0")),  # epoch s; 0: no barrier
+    procs    = parse(Int, get(ENV, "H_PROCS", "0")),         # 0: this process's threads only
+    proc_threads = parse(Int, get(ENV, "H_PROC_THREADS", "10")),
+    proc_flags = get(ENV, "H_PROC_FLAGS", ""))
 
 """
     timed_forward(p, paths, rows, lk, t0, params) → f
@@ -33,7 +37,44 @@ function timed_forward(p, paths, rows, lk, t0, params)
     end
 end
 
+"""
+    start_workers(c) → pids
+
+Add `c.procs` worker processes with `c.proc_threads` threads and `c.proc_flags`, and load the
+packages the forward model needs on them.
+"""
+function start_workers(c)
+    pids = addprocs(c.procs; exeflags=`--project=$ROOT --threads=$(c.proc_threads) $(split(c.proc_flags))`)
+    Distributed.remotecall_eval(Main, pids, :(using ModifiedVLFInversionAlgorithms, AxisKeys, StatsBase))
+    return pids
+end
+
+"""
+    measure_procs(f, pids)
+
+As `measure`, with GC and allocation totals taken from the workers `pids`. `gctime` is the
+mean GC time per worker, comparable with one process's GC time; `maxrss` sums all processes.
+"""
+function measure_procs(f, pids)
+    GC.gc()
+    @sync for w in pids
+        @async remotecall_wait(GC.gc, w)
+    end
+    g0 = [remotecall_fetch(Base.gc_num, w) for w in pids]
+    t = @timed f()
+    ds = [Base.GC_Diff(remotecall_fetch(Base.gc_num, w), g) for (w, g) in zip(pids, g0)]
+    gcs = [d.total_time/1e9 for d in ds]
+    return (; wall=t.time, gctime=mean(gcs), gcmax=maximum(gcs), bytes=sum(d -> d.allocd, ds),
+        pauses=sum(d -> d.pause, ds), full=sum(d -> d.full_sweep, ds),
+        maxrss=Sys.maxrss() + sum(w -> remotecall_fetch(Sys.maxrss, w), pids), value=t.value)
+end
+
 function summarize(k, m, rows)
+    if isempty(rows)
+        @printf("call %d: wall %.1f s, GC per worker mean %.1f s (%.1f%%) max %.1f s, %.1f GiB, pauses %d, full %d, maxrss %.1f GiB\n",
+            k, m.wall, m.gctime, 100m.gctime/m.wall, m.gcmax, m.bytes/2^30, m.pauses, m.full, m.maxrss/2^30)
+        return
+    end
     d = [r.stop - r.start for r in rows]
     busy = sum(d) / (nthreads() * m.wall)
     @printf("call %d: wall %.1f s, GC %.1f s (%.1f%%), %.1f GiB, pauses %d, full %d, maxrss %.1f GiB; member s min/med/max %.1f/%.1f/%.1f, busy %.1f%%\n",
@@ -70,9 +111,14 @@ function main()
     c = harness_config()
     outdir = joinpath(ROOT, c.out)
     isdir(outdir) && error("$outdir exists; refusing to overwrite")
+    c.procs > 0 && (c.numtasks > 0 || c.gclog) && error("H_NUMTASKS and H_GCLOG apply only without H_PROCS")
     c.gclog && GC.enable_logging(true)
     prm = finderparams(c.numtasks)
-    prov = (; provenance()..., numtasks=prm.finderparams.numtasks)
+    pids = c.procs > 0 ? start_workers(c) : nothing
+    wk = pids === nothing ? missing : [(; pid=w, nthreads=remotecall_fetch(Threads.nthreads, w),
+        ngcthreads=remotecall_fetch(Threads.ngcthreads, w)) for w in pids]
+    prov = (; provenance()..., numtasks=pids === nothing ? prm.finderparams.numtasks : c.proc_threads,
+        workers=wk)
     @info "harness" c prov
 
     p = init_params()
@@ -89,11 +135,18 @@ function main()
     lk = ReentrantLock()
     t0 = Ref(time_ns())
 
+    # Workers run the forward model with lmpparams() evaluated on the worker (numtasks = its threads).
+    function forward(pths)
+        pids === nothing && return timed_forward(p, pths, rows, lk, t0, prm)
+        itp, dt, pathstep, datatypes = p.itp, p.dt, p.pathstep, p.datatypes
+        return z -> model_observables(itp, z.xy_state, pths, dt; pathstep, datatypes)
+    end
+
     wpaths = selectpaths(p.paths, "warm")
-    fw = timed_forward(p, wpaths, rows, lk, t0, prm)
-    xw = (; xy_state = x.xy_state[ens=1:1])
-    tw = @elapsed ensemble_model!(newym(p.datatypes, wpaths, axiskeys(xw.xy_state, :ens)), fw, xw)
-    @printf("warm-up (1 member, NML-PIN): %.1f s\n", tw)
+    nw = pids === nothing ? 1 : length(pids)
+    xw = (; xy_state = x.xy_state[ens=1:nw])
+    tw = @elapsed ensemble_model!(newym(p.datatypes, wpaths, axiskeys(xw.xy_state, :ens)), forward(wpaths), xw; pids)
+    @printf("warm-up (1 member per process, NML-PIN): %.1f s\n", tw)
 
     if c.start_at > 0
         wait_s = c.start_at - time()
@@ -104,17 +157,19 @@ function main()
         end
     end
 
-    f = timed_forward(p, paths, rows, lk, t0, prm)
+    f = forward(paths)
     results, timelines, yms = NamedTuple[], Vector{eltype(rows)}[], KeyedArray[]
     for k in 1:c.calls
         ym = newym(p.datatypes, paths, members)
         empty!(rows)
         t0[] = time_ns()
         ta = time()
-        m = measure(() -> ensemble_model!(ym, f, x); mark=c.gclog ? "call $k" : "")
+        m = pids === nothing ? measure(() -> ensemble_model!(ym, f, x); mark=c.gclog ? "call $k" : "") :
+            measure_procs(() -> ensemble_model!(ym, f, x; pids), pids)
         tb = time()
         summarize(k, m, rows)
-        push!(results, (; k, m.wall, m.gctime, m.bytes, m.pauses, m.full, m.maxrss, t_start=ta, t_end=tb))
+        push!(results, (; k, m.wall, m.gctime, gcmax=get(m, :gcmax, m.gctime), m.bytes, m.pauses, m.full,
+            m.maxrss, t_start=ta, t_end=tb))
         push!(timelines, copy(rows))
         push!(yms, ym)
     end

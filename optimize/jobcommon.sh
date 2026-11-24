@@ -1,6 +1,7 @@
 # Sourced by the optimize/*.sh job scripts: paths, environment, provenance, precompile.
 JULIA=/projects/jaca8590/software/julia-1.10.10/bin/julia
 export JULIA_DEPOT_PATH=/projects/jaca8590/Julia/Julia_depot/
+export JULIA_CPU_TARGET="generic;skylake-avx512,clone_all;znver2,clone_all"
 PROJ=/projects/jaca8590/Julia/Optimize_LETKF/RunLETKF
 LOGDIR=/scratch/alpine/jaca8590/Julia/Optimize_LETKF/logs
 cd "$PROJ"

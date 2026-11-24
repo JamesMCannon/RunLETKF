@@ -25,7 +25,8 @@ const CONFIG = (; (Symbol(k) => get(ENV, k, "") for k in ("PATHS", "TOD", "ENS_S
     "NEW_FOLDER", "DISTRIBUTED", "NPROCS", "PROC_THREADS", "PROC_FLAGS"))...)
 const PROV = (; commit=readchomp(`git -C $ROOT rev-parse HEAD`),
     dirty=!isempty(readchomp(`git -C $ROOT status --porcelain --untracked-files=no`)),
-    host=gethostname(), nthreads=Threads.nthreads(), julia=string(VERSION), started=now())
+    host=gethostname(), nthreads=Threads.nthreads(), julia=string(VERSION),
+    cpu_target=get(ENV, "JULIA_CPU_TARGET", ""), started=now())
 @info "g5run" CONFIG PROV
 
 const RUN = @timed include(joinpath(ROOT, "Main.jl"))

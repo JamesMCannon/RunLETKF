@@ -74,5 +74,5 @@ function provenance()
         dirty=!isempty(readchomp(`git -C $ROOT status --porcelain`)),
         host=gethostname(), nthreads=nthreads(), ngcthreads=Threads.ngcthreads(),
         heap_size_hint=hasfield(typeof(jo), :heap_size_hint) ? Int(jo.heap_size_hint) : -1,
-        julia=string(VERSION), started=now())
+        julia=string(VERSION), cpu_target=get(ENV, "JULIA_CPU_TARGET", ""), started=now())
 end

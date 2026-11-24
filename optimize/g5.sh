@@ -9,7 +9,7 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=/scratch/alpine/jaca8590/Julia/Optimize_LETKF/logs/%x_%j.out
 
-# G5 run <config>: Main.jl end to end, results in g5/<config>. A config is <paths><members>_<layout>:
+# G5 run <config>: Main.jl end to end, results in ${G5_OUT:-g5}/<config>. A config is <paths><members>_<layout>:
 # paths min (2 paths, 3 iterations) or avid (22 paths, 1 iteration); layout 1x40 or 4x10.
 # As an array task, the config is entry SLURM_ARRAY_TASK_ID of G5_CFGS.
 set -euo pipefail
@@ -26,7 +26,7 @@ case $SET in
     min)  export PATHS=minimum ITRS=3 ;;
     avid) export PATHS=AVID ITRS=1 ;;
 esac
-export ENS_SIZE=$MEMBERS NEW_FOLDER=g5/$CFG
+export ENS_SIZE=$MEMBERS NEW_FOLDER=${G5_OUT:-g5}/$CFG
 case $LAYOUT in
     1x40) export DISTRIBUTED=false ;;
     4x10) export DISTRIBUTED=true NPROCS=4 PROC_THREADS=10 ;;

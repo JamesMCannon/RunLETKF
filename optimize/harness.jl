@@ -18,17 +18,16 @@ harness_config() = (;
     proc_flags = get(ENV, "H_PROC_FLAGS", ""))
 
 """
-    timed_forward(p, paths, rows, lk, t0, params) → f
+timed_forward(p, paths, rows, lk, t0) → f
 
 `f(z)` is the LETKF forward model for one member; each call appends
 `(thread, start, stop)` (s since `t0[]`) to `rows`.
 """
-function timed_forward(p, paths, rows, lk, t0, params)
+function timed_forward(p, paths, rows, lk, t0)
     return function (z)
         tid = threadid()
         a = time_ns()
-        r = model_observables(p.itp, z.xy_state, paths, p.dt; pathstep=p.pathstep, datatypes=p.datatypes,
-            params)
+        r = model_observables(p.itp, z.xy_state, paths, p.dt; pathstep=p.pathstep, datatypes=p.datatypes)
         b = time_ns()
         lock(lk) do
             push!(rows, (; thread=tid, start=(a - t0[])/1e9, stop=(b - t0[])/1e9))
@@ -111,14 +110,12 @@ function main()
     c = harness_config()
     outdir = joinpath(ROOT, c.out)
     isdir(outdir) && error("$outdir exists; refusing to overwrite")
-    c.procs > 0 && (c.numtasks > 0 || c.gclog) && error("H_NUMTASKS and H_GCLOG apply only without H_PROCS")
+    c.procs > 0 && c.gclog && error("H_GCLOG applies only without H_PROCS")
     c.gclog && GC.enable_logging(true)
-    prm = finderparams(c.numtasks)
     pids = c.procs > 0 ? start_workers(c) : nothing
     wk = pids === nothing ? missing : [(; pid=w, nthreads=remotecall_fetch(Threads.nthreads, w),
         ngcthreads=remotecall_fetch(Threads.ngcthreads, w)) for w in pids]
-    prov = (; provenance()..., numtasks=pids === nothing ? prm.finderparams.numtasks : c.proc_threads,
-        workers=wk)
+        prov = (; provenance()..., workers=wk)
     @info "harness" c prov
 
     p = init_params()
@@ -135,9 +132,9 @@ function main()
     lk = ReentrantLock()
     t0 = Ref(time_ns())
 
-    # Workers run the forward model with lmpparams() evaluated on the worker (numtasks = its threads).
+    # Each process runs the F1r search with its fixed settings (numtasks 1 per region).
     function forward(pths)
-        pids === nothing && return timed_forward(p, pths, rows, lk, t0, prm)
+        pids === nothing && return timed_forward(p, pths, rows, lk, t0)
         itp, dt, pathstep, datatypes = p.itp, p.dt, p.pathstep, p.datatypes
         return z -> model_observables(itp, z.xy_state, pths, dt; pathstep, datatypes)
     end

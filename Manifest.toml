@@ -1459,7 +1459,7 @@ version = "1.2.0"
 
 [[deps.LongwaveModePropagator]]
 deps = ["Dates", "DiffEqCallbacks", "EnumX", "FunctionWrappers", "Interpolations", "JSON", "LinearAlgebra", "ModifiedHankelFunctionsOfOrderOneThird", "OrdinaryDiffEq", "Parameters", "PolynomialRoots", "ProgressLogging", "Romberg", "RootsAndPoles", "StaticArrays"]
-git-tree-sha1 = "352b5da071539ffe1793650969e7f2ec7665ed75"
+git-tree-sha1 = "36645e1eb8dec1ecaf0e37f125c672b752809349"
 repo-rev = "main"
 repo-url = "https://github.com/fgasdia/LongwaveModePropagator.jl"
 uuid = "38c6559a-e0a7-48c6-827d-3f02e2d19cec"
@@ -1597,8 +1597,8 @@ uuid = "b1c65800-dbf0-11e8-0001-4d87e1e07e69"
 version = "1.1.3"
 
 [[deps.ModifiedVLFInversionAlgorithms]]
-deps = ["AxisKeys", "Dates", "Distributed", "Distributions", "GeoStats", "GeoTables", "GeographicLib", "ImageFiltering", "Interpolations", "IntervalSets", "LMPTools", "LibGEOS", "LinearAlgebra", "LongwaveModePropagator", "NLopt", "NonlinearSolve", "ProgressMeter", "Proj", "Random", "ScatteredInterpolation", "StaticArrays", "StaticArraysCore", "Statistics", "StatsBase", "TableTransforms", "UnPack"]
-git-tree-sha1 = "d317a2df7e1defd3cb003aed89a2994e25112994"
+deps = ["AxisKeys", "Dates", "Distributed", "Distributions", "GeoStats", "GeoTables", "GeographicLib", "ImageFiltering", "Interpolations", "IntervalSets", "LMPTools", "LibGEOS", "LinearAlgebra", "Logging", "LongwaveModePropagator", "NLopt", "NonlinearSolve", "ProgressMeter", "Proj", "Random", "ScatteredInterpolation", "StaticArrays", "StaticArraysCore", "Statistics", "StatsBase", "TableTransforms", "UnPack"]
+git-tree-sha1 = "e2fc07df7e77c28fd5ba3d6fd75ad7d5468fbb19"
 repo-rev = "gc-optimization"
 repo-url = "https://github.com/JamesMCannon/ModifiedVLFInversionAlgorithms.jl"
 uuid = "325dd450-e17c-4c65-9110-778031d3fbdc"

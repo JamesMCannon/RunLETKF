@@ -11,14 +11,13 @@ harness_config() = (;
     calls   = parse(Int, get(ENV, "H_CALLS", "3")),
     out     = get(ENV, "H_OUT", "g1/run"),
     gclog   = parse(Bool, get(ENV, "H_GCLOG", "false")),
-    numtasks = parse(Int, get(ENV, "H_NUMTASKS", "0")),     # 0: lmpparams() default
     start_at = parse(Float64, get(ENV, "H_START_AT", "0")),  # epoch s; 0: no barrier
     procs    = parse(Int, get(ENV, "H_PROCS", "0")),         # 0: this process's threads only
     proc_threads = parse(Int, get(ENV, "H_PROC_THREADS", "10")),
     proc_flags = get(ENV, "H_PROC_FLAGS", ""))
 
 """
-timed_forward(p, paths, rows, lk, t0) → f
+    timed_forward(p, paths, rows, lk, t0) → f
 
 `f(z)` is the LETKF forward model for one member; each call appends
 `(thread, start, stop)` (s since `t0[]`) to `rows`.
@@ -115,7 +114,7 @@ function main()
     pids = c.procs > 0 ? start_workers(c) : nothing
     wk = pids === nothing ? missing : [(; pid=w, nthreads=remotecall_fetch(Threads.nthreads, w),
         ngcthreads=remotecall_fetch(Threads.ngcthreads, w)) for w in pids]
-        prov = (; provenance()..., workers=wk)
+    prov = (; provenance()..., workers=wk)
     @info "harness" c prov
 
     p = init_params()

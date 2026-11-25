@@ -11,7 +11,7 @@
 #SBATCH --output=/scratch/alpine/jaca8590/Julia/Optimize_LETKF/logs/%x_%j.out
 
 # Writes h2/$H2_LABEL/$H2_NAME.jls (optimize/h2_export.jl) for Mesh_Testing's lmp_truth_states.jl.
-# Usage: H2_STATE=g1/state_t1 H2_LABEL=g1_state_t1 [H2_MEMBERS=1] [H2_NAME=smoke] sbatch optimize/h2_export.sh
+# Usage: sbatch --export=ALL,H2_STATE=g1/state_t1,H2_LABEL=g1_state_t1[,H2_MEMBERS=1,H2_NAME=smoke] optimize/h2_export.sh
 set -uo pipefail
 cd /projects/jaca8590/Julia/Optimize_LETKF/RunLETKF
 source optimize/jobcommon.sh

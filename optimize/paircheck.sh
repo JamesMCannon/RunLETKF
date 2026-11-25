@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=pc
 #SBATCH --qos=preemptable
-#SBATCH --constraint=skylake|cascade
 #SBATCH --exclude=bhpc-c5-u7-23
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

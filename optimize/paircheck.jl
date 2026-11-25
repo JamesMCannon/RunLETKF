@@ -16,16 +16,18 @@ observables(input, mesh, path) =
 """
     rununit(p, xm, path; radius) → NamedTuple
 
-Builds the path's input from member state `xm` as `model_observables` does, checks every
-segment against `MVIA.AVIDMESH`, and, when a verified root is absent from it, compares the
-receiver observables with and without the absent roots.
+Builds the path's input from member state `xm` as `model_observables` does, interpolating over
+the state's own active cells; checks every segment against `MVIA.AVIDMESH`; and, when a verified
+root is absent from it, compares the receiver observables with and without the absent roots.
 """
 function rununit(p, xm, path; radius)
     tx, rx = path
-    v = [vec(xm(:h)); vec(xm(:b))]
-    n = length(v) ÷ 2
-    hitp = SI.interpolate(p.itp.method, p.itp.coords, filter(!isnan, v[1:n]))
-    bitp = SI.interpolate(p.itp.method, p.itp.coords, filter(!isnan, v[n+1:end]))
+    h, b = xm(:h), xm(:b)
+    isnan.(h) == isnan.(b) || error("h′ and β have different active cells")
+    # the state's own active cells: a state saved before the H1 localization differs from p.itp's
+    coords = MVIA.build_xygrid(h)
+    hitp = SI.interpolate(p.itp.method, coords, filter(!isnan, vec(h)))
+    bitp = SI.interpolate(p.itp.method, coords, filter(!isnan, vec(b)))
     input = MVIA.model_observation(p.itp, hitp, bitp, tx, rx, p.dt; pathstep=p.pathstep,
         fieldcomponent=LMP.Fields.H)
     H = MVIA.waittopheight(input.hprimes, input.betas)

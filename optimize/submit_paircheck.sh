@@ -9,7 +9,7 @@ PROJ=/projects/jaca8590/Julia/Optimize_LETKF/RunLETKF
 LOGDIR=/scratch/alpine/jaca8590/Julia/Optimize_LETKF/logs
 STATES=${PC_STATES:-"g1/state_t1 h1/avid100_4x10"}
 NTASKS=${PC_NTASKS:-60}
-EXPECTED=${PC_EXPECTED:-2400}
+EXPECTED=${PC_EXPECTED:-2200}
 PRE=(--qos=preemptable --exclude=bhpc-c5-u7-23 --nodes=1 --ntasks=1 --parsable)
 cd "$PROJ"
 

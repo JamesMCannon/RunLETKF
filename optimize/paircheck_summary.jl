@@ -18,7 +18,7 @@ function main()
     worst = (amp=0.0, phase=0.0, s2=0.0, s3=0.0)
     open(joinpath(dir, "clusters.csv"), "w") do cio
     open(joinpath(dir, "absent.csv"), "w") do aio
-        println(cio, "member,path,segment,class,n_raw,boxes,min_gap_rad,zeros,located,verified,winding,reliable,poles_inside,poles_near,re_deg,im_deg")
+        println(cio, "member,path,segment,class,n_raw,boxes,min_gap_rad,count_radius_rad,zeros,located,verified,verify_radius_rad,winding,reliable,poles_inside,poles_near,re_deg,im_deg")
         println(aio, "member,path,segment,re_deg,im_deg,cluster_class,d_amp_dB,d_phase_deg,d_s2,d_s3")
         for f in files
             u = load(f)
@@ -32,9 +32,10 @@ function main()
                 nseg += 1; nraw += length(s.raw); nunmatched += length(s.unmatched)
                 for c in s.clusters
                     classes[c.class] = get(classes, c.class, 0) + 1
-                    @printf(cio, "%d,%s,%d,%s,%d,%s,%.3e,%d,%d,%s,%.4f,%s,%d,%d,%.6f,%.6f\n", m, path, k, c.class,
-                        length(c.raw), join(c.boxes, ";"), minimum(c.gaps), c.zeros, length(c.roots),
-                        join(c.verified, ";"), c.winding, c.reliable, c.poles_inside, c.poles_near_circle,
+                    @printf(cio, "%d,%s,%d,%s,%d,%s,%.3e,%.3e,%d,%d,%s,%s,%.4f,%s,%d,%d,%.6f,%.6f\n", m, path, k, c.class,
+                        length(c.raw), join(c.boxes, ";"), minimum(c.gaps), c.radius, c.zeros, length(c.roots),
+                        join(c.verified, ";"), join((@sprintf("%.3e", r) for r in c.vradius), ";"),
+                        c.winding, c.reliable, c.poles_inside, c.poles_near_circle,
                         rad2deg(real(c.center)), rad2deg(imag(c.center)))
                 end
                 for θ in s.absent

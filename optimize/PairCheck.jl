@@ -12,10 +12,12 @@ For one segment, [`checksegment`](@ref):
 2. groups raw roots closer than `radius` (single linkage) into clusters;
 3. Newton-polishes each cluster member twice, once with its step capped at 0.4 of the distance to
    its nearest neighbour and once uncapped (with a Vern7 retry), and keeps the distinct results;
-4. counts the zeros in a circle around the cluster with the argument principle, adding the poles
-   inside, and runs Newton on F deflated by the roots already found while fewer are located;
+4. counts the zeros in a circle around the cluster, of radius at least `RMIN`, with the argument
+   principle, adding the poles inside, and runs Newton on F deflated by the roots already found
+   while fewer are located;
 5. checks each located root with a circle of radius min(gap/10, pole distance/2, 1e-4) whose
-   winding number must be +1;
+   winding number must be +1. A cluster whose count is unreliable is still "single" when its one
+   located root passes that check on a circle that contains all of the cluster's raw roots;
 6. lists every converged root that the production root list lacks (roots within `guard90` of 90°
    excepted).
 
@@ -30,6 +32,8 @@ export checksegment, AugmentedMesh
 
 const MERGE = 1e-7    # rad; polished results closer than this are one root (production dedupe)
 const MATCH = 1e-6    # rad; a root within this of a production root is present there
+# rad; smallest counting circle. Near 84° the evaluation noise of F equals |F| about 1e-6 from a root.
+const RMIN = 1e-5
 
 function rawroots(me, regions; tol=3e-5, remax=89.9, params=LMPParams())
     roots, boxes, poles = ComplexF64[], Int[], ComplexF64[]
@@ -145,7 +149,7 @@ function checkcluster(me, roots, boxes, poles, idx; params)
     end
 
     c = sum(raw)/length(raw)
-    margin = max(0.5minimum(gaps), 1e-6)
+    margin = max(0.5minimum(gaps), RMIN)
     radius = maximum(abs(x - c) for x in [raw; D]) + margin
     pin = count(p -> abs(p - c) < radius, poles)
     pnear = count(p -> abs(abs(p - c) - radius) < 0.1radius, poles)
@@ -158,18 +162,25 @@ function checkcluster(me, roots, boxes, poles, idx; params)
         ok && abs(θ - c) < radius && addunique!(D, θ)
     end
 
-    verified = map(D) do d
+    vradius = map(D) do d
         others = [abs(d - e) for e in D if e != d]
         pd = isempty(poles) ? Inf : minimum(abs(p - d) for p in poles)
-        r = min(isempty(others) ? Inf : minimum(others)/10, pd/2, 1e-4)
+        min(isempty(others) ? Inf : minimum(others)/10, pd/2, 1e-4)
+    end
+    verified = map(D, vradius) do d, r
         wd, _, rel = winding(me, d, r; params)
         rel && isfinite(wd) && round(Int, wd) == 1
     end
 
-    class = !reliable || pnear > 0 || Z < 1 ? "inconclusive" :
-            Z == 1 && length(D) == 1 && all(verified) ? "single" :
-            Z ≥ 2 && length(D) == Z && all(verified) ? "distinct" : "inconclusive"
-    return (; members=idx, raw, boxes=boxes[idx], gaps, capped, uncapped, roots=D, verified,
+    class = if reliable && pnear == 0 && Z ≥ 1
+        Z == 1 && length(D) == 1 && all(verified) ? "single" :
+        Z ≥ 2 && length(D) == Z && all(verified) ? "distinct" : "inconclusive"
+    elseif length(D) == 1 && only(verified) && all(x -> abs(x - only(D)) < only(vradius), raw)
+        "single"
+    else
+        "inconclusive"
+    end
+    return (; members=idx, raw, boxes=boxes[idx], gaps, capped, uncapped, roots=D, verified, vradius,
             center=c, radius, winding=w, npoints=npts, reliable, poles_inside=pin,
             poles_near_circle=pnear, zeros=Z, class)
 end

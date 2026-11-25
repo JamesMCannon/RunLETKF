@@ -1,7 +1,8 @@
 #!/bin/bash
-# H1 submission: setup (instantiate, precompile for JULIA_CPU_TARGET, check MVIA and LMP) -> minimum
-# pathset, 1x40 against 4x10 over 3 iterations, which must match exactly -> full AVID, one iteration,
-# 100 and 50 members, 1x40 and 4x10 -> comparison report with the G5 runs. Results in h1/.
+# H1 submission: setup (instantiate and precompile into the job depot for JULIA_CPU_TARGET, check
+# MVIA and LMP, load everything Main.jl loads without cache warnings) -> minimum pathset, 1x40
+# against 4x10 over 3 iterations, which must match exactly -> full AVID, one iteration, 100 and 50
+# members, 1x40 and 4x10 -> comparison report with the G5 runs. Results in h1/.
 # Usage: bash optimize/submit_h1.sh
 set -euo pipefail
 PROJ=/projects/jaca8590/Julia/Optimize_LETKF/RunLETKF
@@ -10,7 +11,7 @@ COMMON=(--qos=blanca-lair --exclude=bhpc-c5-u7-23 --nodes=1 --ntasks=1 --parsabl
 cd "$PROJ"
 
 [ -e h1 ] && { echo "h1/ exists; move it aside first (runs refuse to overwrite or resume)"; exit 1; }
-for f in g5.sh g5run.jl compare_g5.jl jobcommon.sh; do
+for f in g5.sh g5run.jl compare_g5.jl jobcommon.sh loadtest.jl; do
     [ -f optimize/$f ] || { echo "missing optimize/$f"; exit 1; }
 done
 grep -q 'G5_OUT' optimize/g5.sh || { echo "optimize/g5.sh does not take G5_OUT"; exit 1; }
@@ -19,11 +20,12 @@ for d in g5/avid100_1x40 g5/avid100_4x10 g5/avid50_1x40 g5/avid50_4x10; do
 done
 
 ENVSETUP='JULIA=/projects/jaca8590/software/julia-1.10.10/bin/julia
-export JULIA_DEPOT_PATH=/projects/jaca8590/Julia/Julia_depot/
+export JULIA_DEPOT_PATH=/projects/jaca8590/Julia/Julia_depot_runletkf/
 export JULIA_CPU_TARGET="generic;skylake-avx512,clone_all;znver2,clone_all"
+export JULIA_PKG_PRECOMPILE_AUTO=0
 cd /projects/jaca8590/Julia/Optimize_LETKF/RunLETKF'
 
-SETUP=$(sbatch "${COMMON[@]}" --job-name=letkf_h1_setup --cpus-per-task=40 --mem=0 --time=02:00:00 \
+SETUP=$(sbatch "${COMMON[@]}" --job-name=letkf_h1_setup --cpus-per-task=40 --mem=0 --time=04:00:00 \
     --output="$LOGDIR/%x_%j.out" <<JOB
 #!/bin/bash
 set -euo pipefail
@@ -35,6 +37,7 @@ git status --porcelain
 tr -d '\r' < Manifest.toml | awk '/^\[\[deps\.(LongwaveModePropagator|ModifiedVLFInversionAlgorithms|RootsAndPoles)\]\]/{p=\$0} p && /git-tree-sha1/{print p, \$0; p=""}'
 "\$JULIA" --project=. -e '
     using Pkg
+    isempty(Pkg.Registry.reachable_registries()) && Pkg.Registry.add("General")
     Pkg.instantiate()
     Pkg.precompile()
     using Distributed, ModifiedVLFInversionAlgorithms
@@ -45,6 +48,11 @@ tr -d '\r' < Manifest.toml | awk '/^\[\[deps\.(LongwaveModePropagator|ModifiedVL
     hasmethod(ensemble_model!, Tuple{Any,Any,NamedTuple}, (:pids,)) ||
         error("MVIA in the Manifest has no multi-process ensemble_model!")
     println("setup ok")'
+LT=\$(mktemp)
+"\$JULIA" --project=. -t 4 optimize/loadtest.jl 2>&1 | tee "\$LT"
+if grep -q -E "missing from the cache|does not support precompilation" "\$LT"; then
+    echo "package caches are inconsistent; not starting the runs"; exit 1
+fi
 echo "== end \$(date -Is)"
 JOB
 )

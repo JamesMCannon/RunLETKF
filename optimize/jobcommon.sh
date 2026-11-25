@@ -1,7 +1,9 @@
-# Sourced by the optimize/*.sh job scripts: paths, environment, provenance, precompile.
+# Sourced by the optimize/*.sh job scripts: paths, environment, provenance. Tasks never precompile:
+# the submit script's setup job builds the job depot and checks that everything loads from it.
 JULIA=/projects/jaca8590/software/julia-1.10.10/bin/julia
-export JULIA_DEPOT_PATH=/projects/jaca8590/Julia/Julia_depot/
+export JULIA_DEPOT_PATH=/projects/jaca8590/Julia/Julia_depot_runletkf/
 export JULIA_CPU_TARGET="generic;skylake-avx512,clone_all;znver2,clone_all"
+export JULIA_PKG_PRECOMPILE_AUTO=0
 PROJ=/projects/jaca8590/Julia/Optimize_LETKF/RunLETKF
 LOGDIR=/scratch/alpine/jaca8590/Julia/Optimize_LETKF/logs
 cd "$PROJ"
@@ -19,10 +21,6 @@ echo "uncommitted changes:"
 git status --porcelain
 git diff --stat
 tr -d '\r' < Manifest.toml | awk '/^\[\[deps\.(LongwaveModePropagator|ModifiedVLFInversionAlgorithms|RootsAndPoles)\]\]/{p=$0} p && /git-tree-sha1/{print p, $0; p=""}'
-
-echo "== precompile, start $(date -Is)"
-"$JULIA" --project="$PROJ" -e 'using Pkg; Pkg.precompile()'
-echo "== precompile end $(date -Is)"
 
 jl() {  # label, threads, script; H_*/S_*/A_* and JFLAGS set by caller
     echo "== $1, $2 threads, flags '${JFLAGS:-}', start $(date -Is)"

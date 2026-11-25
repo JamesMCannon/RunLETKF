@@ -15,7 +15,7 @@ using ProgressMeter
 
 using LMPTools, WaitProfileEstimators
 
-using ModifiedVLFInversionAlgorithms #remember to run ] up ModifiedVLFInversionAlgorithms to pull any changes to the branch
+using ModifiedVLFInversionAlgorithms
 
 using Distributed
 

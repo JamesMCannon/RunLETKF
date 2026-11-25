@@ -8,6 +8,8 @@ using Serialization
 const INPUT_FIELDS = (:segment_ranges, :hprimes, :betas, :b_mags, :b_dips, :b_azs, :ground_sigmas,
     :ground_epsrs, :frequency)
 
+const HTOL, BTOL = 1e-6, 1e-8   # km, km⁻¹: far below physical significance, far above round-off
+
 parsemembers(s) = occursin(':', s) ? (r = parse.(Int, split(s, ':')); collect(r[1]:r[2])) :
     parse.(Int, split(s, ','))
 
@@ -26,11 +28,18 @@ function record(p, xm, path, m, pcdir)
     H = MVIA.waittopheight(input.hprimes, input.betas)
     name = MVIA.pathname(path)
     pc = load(joinpath(pcdir, @sprintf("m%03d_%s.jld2", m, name)), "result")
-    (pc.hprimes == input.hprimes && pc.betas == input.betas && pc.topheight == H) ||
-        error("member $m $name: input differs from the pair check's")
+    n = length(input.segment_ranges)
+    (length(pc.hprimes) == n && length(pc.segments) == n) ||
+        error("member $m $name: $n segments here, $(length(pc.hprimes)) in the pair check")
+    dh, db = maximum(abs, pc.hprimes .- input.hprimes), maximum(abs, pc.betas .- input.betas)
+    (dh ≤ HTOL && db ≤ BTOL) ||
+        error(@sprintf("member %d %s: pair check's h′ differs by %.3g km, β by %.3g km⁻¹", m, name, dh, db))
+    # h′, β and top height exactly as the pair check found the roots for
+    input.hprimes .= pc.hprimes
+    input.betas .= pc.betas
     roots = [ComplexF64.(s.production) for s in pc.segments]
-    length(roots) == length(input.segment_ranges) || error("member $m $name: segment count differs")
-    return (; member=m, path=name, rxdist=Float64(range(tx, rx)), input=plain(input), roots, H)
+    return (; member=m, path=name, rxdist=Float64(range(tx, rx)), input=plain(input), roots,
+        H=pc.topheight, dh, db, dH=abs(pc.topheight - H))
 end
 
 function main()
@@ -63,6 +72,8 @@ function main()
         Hs[(end + 1) ÷ 2]/1e3, extrema(reduce(vcat, [r.input.hprimes for r in records]))...,
         extrema(reduce(vcat, [r.input.betas for r in records]))...)
     @printf("largest segment-length spread within a path: %.3g m\n", worst)
+    @printf("largest rebuild difference from the pair check: h′ %.3g km, β %.3g km⁻¹, top height %.3g m\n",
+        maximum(r -> r.dh, records), maximum(r -> r.db, records), maximum(r -> r.dH, records))
     @printf("provenance: %s\n", provenance())
 end
 
